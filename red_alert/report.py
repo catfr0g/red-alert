@@ -32,7 +32,9 @@ def format_report(report: RunReport, *, secrets: Sequence[str]) -> str:
     return mask_secrets(format_summary(report), secrets)
 
 
-def format_json_report(report: RunReport, *, secrets: Sequence[str]) -> str:
+def format_json_report(
+    report: RunReport, *, secrets: Sequence[str], include_failed: bool = False
+) -> str:
     payload = {
         "scenario": report.scenario,
         "target": report.target,
@@ -47,7 +49,7 @@ def format_json_report(report: RunReport, *, secrets: Sequence[str]) -> str:
                 "steps": [step.model_dump() for step in attempt.steps],
             }
             for attempt in report.attempts
-            if attempt.success
+            if include_failed or attempt.success
         ],
     }
     return mask_secrets(json.dumps(payload, ensure_ascii=False, indent=2, default=str), secrets)

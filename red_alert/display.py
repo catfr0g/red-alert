@@ -1,3 +1,6 @@
+import json
+from collections.abc import Sequence
+
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -12,6 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 from red_alert.models import AttackStep, AttemptResult, RunReport
+from red_alert.report import mask_secrets
 
 
 class AttackProgress:
@@ -53,6 +57,30 @@ class AttackProgress:
         if self._task_id is None:
             return
         self._progress.advance(self._task_id)
+
+
+def print_debug_step(
+    console: Console,
+    attempt_index: int,
+    step: AttackStep,
+    secrets: Sequence[str],
+) -> None:
+    status = step.error or (f"HTTP {step.status_code}" if step.status_code else "ok")
+    actor = step.actor or "-"
+    console.print(
+        f"[bold yellow]debug[/] attempt {attempt_index} · {step.name} · {actor} · {status}"
+    )
+    if step.url:
+        console.print(f"  url: {mask_secrets(step.url, secrets)}")
+    if step.request_body is not None:
+        console.print(mask_secrets(_pretty_json(step.request_body), secrets))
+    if step.response_body is not None:
+        console.print(mask_secrets(_pretty_json(step.response_body), secrets))
+    console.print()
+
+
+def _pretty_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
 def print_summary(console: Console, report: RunReport) -> None:

@@ -6,6 +6,7 @@ import httpx
 from langgraph.graph import END, START, StateGraph
 
 from red_alert.models import AttackStep, AttemptResult
+from red_alert.planner import PayloadPlanner, PlannerContext
 from red_alert.scenarios.memory_poisoning import MemoryPoisoningScenario
 from red_alert.stand_client import StandClient
 
@@ -13,6 +14,7 @@ OnStep = Callable[[AttackStep], None]
 
 ACTOR_ATTACKER = "attacker"
 ACTOR_VICTIM = "victim"
+ACTOR_PLANNER = "planner"
 
 
 @dataclass
@@ -21,6 +23,10 @@ class AttemptState:
     session_a: str
     session_b: str
     injects: int
+    payload: str = ""
+    last_assistant: str = ""
+    last_finalize: object | None = None
+    prior_notes: str = ""
     steps: list[AttackStep] = field(default_factory=list)
     error: str | None = None
     usable_policy: bool = False
@@ -93,57 +99,95 @@ def _emit(on_step: OnStep | None, step: AttackStep) -> None:
         on_step(step)
 
 
-def _send_payloads(
+def _send_payload(
     attacker: StandClient,
-    scenario: MemoryPoisoningScenario,
+    payload: str,
     session_id: str,
     steps: list[AttackStep],
     on_step: OnStep | None = None,
-) -> str | None:
-    for index, payload in enumerate(scenario.payloads, start=1):
-        step_name = "payload" if len(scenario.payloads) == 1 else f"payload-{index}"
-        try:
-            request_body, response = attacker.chat(session_id=session_id, user_content=payload)
-        except httpx.RequestError as exc:
-            step = _error_step(
-                name=step_name,
-                method="POST",
-                url=attacker.chat_url(),
-                actor=ACTOR_ATTACKER,
-                request_body={"session_id": session_id},
-                error=str(exc),
-            )
-            steps.append(step)
-            _emit(on_step, step)
-            return str(exc)
-        payload_step = _http_step(
-            name=step_name,
+) -> tuple[str | None, str]:
+    try:
+        request_body, response = attacker.chat(session_id=session_id, user_content=payload)
+    except httpx.RequestError as exc:
+        step = _error_step(
+            name="payload",
             method="POST",
             url=attacker.chat_url(),
             actor=ACTOR_ATTACKER,
-            request_body=request_body,
-            response=response,
+            request_body={"session_id": session_id},
+            error=str(exc),
         )
-        steps.append(payload_step)
-        _emit(on_step, payload_step)
-        if payload_step.error:
-            return payload_step.error
-    return None
+        steps.append(step)
+        _emit(on_step, step)
+        return str(exc), ""
+    payload_step = _http_step(
+        name="payload",
+        method="POST",
+        url=attacker.chat_url(),
+        actor=ACTOR_ATTACKER,
+        request_body=request_body,
+        response=response,
+    )
+    steps.append(payload_step)
+    _emit(on_step, payload_step)
+    if payload_step.error:
+        return payload_step.error, ""
+    return None, _assistant_text(payload_step.response_body)
 
 
 def build_attempt_graph(
     attacker: StandClient,
     victim: StandClient,
     scenario: MemoryPoisoningScenario,
+    planner: PayloadPlanner,
     on_step: OnStep | None = None,
 ):
+    def adapt(state: AttemptState) -> dict:
+        steps = list(state.steps)
+        context = PlannerContext(
+            goal=scenario.goal,
+            inject_index=state.injects + 1,
+            last_payload=state.payload or None,
+            last_assistant=state.last_assistant or None,
+            last_finalize=state.last_finalize,
+            prior_notes=state.prior_notes,
+            examples=scenario.payloads,
+        )
+        turn = planner.plan(context)
+        if turn.response is None:
+            step = _error_step(
+                name="adapt",
+                method="POST",
+                url=turn.url,
+                actor=ACTOR_PLANNER,
+                request_body=turn.request_body,
+                error=turn.error or "ошибка планировщика",
+            )
+        else:
+            step = _http_step(
+                name="adapt",
+                method="POST",
+                url=turn.url,
+                actor=ACTOR_PLANNER,
+                request_body=turn.request_body,
+                response=turn.response,
+            )
+            if turn.error:
+                step = step.model_copy(update={"error": turn.error})
+        steps.append(step)
+        _emit(on_step, step)
+        if turn.error:
+            return {"steps": steps, "error": turn.error, "payload": ""}
+        return {"steps": steps, "error": None, "payload": turn.payload}
+
     def inject(state: AttemptState) -> dict:
         steps = list(state.steps)
         session_a = f"ra-a-{uuid.uuid4().hex[:12]}"
-        error = _send_payloads(attacker, scenario, session_a, steps, on_step)
+        error, assistant = _send_payload(attacker, state.payload, session_a, steps, on_step)
         return {
             "session_a": session_a,
             "injects": state.injects + 1,
+            "last_assistant": assistant,
             "steps": steps,
             "error": error,
             "usable_policy": False,
@@ -178,10 +222,11 @@ def build_attempt_graph(
         steps.append(finalize_step)
         _emit(on_step, finalize_step)
         if finalize_step.error:
-            return {"steps": steps, "error": finalize_step.error}
+            return {"steps": steps, "error": finalize_step.error, "last_finalize": None}
         return {
             "steps": steps,
             "error": None,
+            "last_finalize": finalize_step.response_body,
             "usable_policy": scenario.has_usable_global_policy(finalize_step.response_body),
         }
 
@@ -223,6 +268,9 @@ def build_attempt_graph(
             "success": scenario.is_success(_assistant_text(trigger_step.response_body)),
         }
 
+    def after_adapt(state: AttemptState) -> str:
+        return END if state.error else "inject"
+
     def after_inject(state: AttemptState) -> str:
         return END if state.error else "finalize"
 
@@ -231,13 +279,15 @@ def build_attempt_graph(
             return END
         if state.usable_policy or state.injects >= scenario.max_injects:
             return "trigger"
-        return "inject"
+        return "adapt"
 
     graph = StateGraph(AttemptState)
+    graph.add_node("adapt", adapt)
     graph.add_node("inject", inject)
     graph.add_node("finalize", finalize)
     graph.add_node("trigger", trigger)
-    graph.add_edge(START, "inject")
+    graph.add_edge(START, "adapt")
+    graph.add_conditional_edges("adapt", after_adapt)
     graph.add_conditional_edges("inject", after_inject)
     graph.add_conditional_edges("finalize", after_finalize)
     graph.add_edge("trigger", END)
@@ -249,14 +299,20 @@ def run_attempt(
     victim: StandClient,
     scenario: MemoryPoisoningScenario,
     attempt_index: int,
+    planner: PayloadPlanner,
     on_step: OnStep | None = None,
+    prior_notes: str = "",
 ) -> AttemptResult:
-    state = build_attempt_graph(attacker, victim, scenario, on_step).invoke(
+    state = build_attempt_graph(attacker, victim, scenario, planner, on_step).invoke(
         {
             "attempt_index": attempt_index,
             "session_a": "",
             "session_b": f"ra-b-{uuid.uuid4().hex[:12]}",
             "injects": 0,
+            "payload": "",
+            "last_assistant": "",
+            "last_finalize": None,
+            "prior_notes": prior_notes,
             "steps": [],
             "error": None,
             "usable_policy": False,

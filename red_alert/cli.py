@@ -9,8 +9,9 @@ import httpx
 from rich.console import Console
 
 from red_alert.config import DEFAULT_SCENARIO, UsageError, merged_environ, resolve_config
-from red_alert.display import AttackProgress, print_summary
-from red_alert.models import AttackStep
+from red_alert.display import AttackProgress, print_debug_step, print_summary
+from red_alert.models import AttackStep, RunReport
+from red_alert.planner import LlmConfig, OpenAICompatPlanner
 from red_alert.report import format_json_report
 from red_alert.runner import run_attack
 
@@ -37,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         "-o",
         help="Записать JSON-трейсы успешных атак в UTF-8 файл",
+    )
+    attack.add_argument(
+        "--debug",
+        action="store_true",
+        help="Полный лог всех шагов на stderr и traces всех попыток",
     )
     return parser
 
@@ -67,6 +73,7 @@ def main(
             scenario=args.scenario,
             attempts=args.attempts,
             environ=env,
+            debug=args.debug,
         )
     except UsageError as exc:
         print(str(exc), file=sys.stderr)
@@ -74,37 +81,59 @@ def main(
 
     out = console or Console()
     log = progress_console or Console(stderr=True)
-
-    def on_step(step: AttackStep) -> None:
-        progress.on_step(current[0], step)
+    secrets = (config.api_key, config.victim_api_key, config.openai_api_key)
 
     current = [1]
+
+    def on_step(step: AttackStep) -> None:
+        if config.debug:
+            print_debug_step(log, current[0], step, secrets)
+        elif progress is not None:
+            progress.on_step(current[0], step)
+
+    def mark_done(_result: object) -> None:
+        if progress is not None:
+            progress.on_attempt_done()
+        current[0] += 1
+
     owns_client = http_client is None
     client = http_client or httpx.Client(timeout=HTTP_TIMEOUT_SECONDS)
+    progress: AttackProgress | None = None
     try:
-        with AttackProgress(log, config.attempts) as progress:
+        planner = OpenAICompatPlanner(
+            LlmConfig(
+                api_key=config.openai_api_key,
+                base_url=config.openai_base_url,
+                model=config.model,
+                max_tokens=config.max_tokens,
+            ),
+            client,
+        )
 
-            def mark_done(_result: object) -> None:
-                progress.on_attempt_done()
-                current[0] += 1
-
-            report = run_attack(
+        def run() -> RunReport:
+            return run_attack(
                 target=config.target,
                 api_key=config.api_key,
                 victim_api_key=config.victim_api_key,
                 scenario_name=config.scenario,
                 attempts=config.attempts,
                 http_client=client,
+                planner=planner,
                 on_step=on_step,
                 on_attempt_done=mark_done,
             )
+
+        if config.debug:
+            report = run()
+        else:
+            with AttackProgress(log, config.attempts) as progress:
+                report = run()
     finally:
         if owns_client:
             client.close()
 
-    secrets = (config.api_key, config.victim_api_key)
     print_summary(out, report)
-    json_text = format_json_report(report, secrets=secrets)
+    json_text = format_json_report(report, secrets=secrets, include_failed=config.debug)
     output = getattr(args, "output", None)
     if output:
         Path(output).write_text(json_text + "\n", encoding="utf-8")

@@ -95,3 +95,29 @@ def test_json_report_includes_only_successful_traces() -> None:
     assert "finalize" in payload
     assert "trigger" in payload
     assert "sk-secret" not in payload
+
+
+def test_json_report_includes_failed_traces_when_asked() -> None:
+    report = RunReport(
+        scenario="memory-poisoning",
+        target="http://localhost:8600",
+        attempts=[
+            AttemptResult(
+                attempt_index=2,
+                success=False,
+                session_a="a2",
+                session_b="b2",
+                steps=[
+                    AttackStep(
+                        name="adapt",
+                        method="POST",
+                        url="https://openrouter.ai/api/v1/chat/completions",
+                        actor="planner",
+                    )
+                ],
+            )
+        ],
+    )
+    payload = format_json_report(report, secrets=["sk-secret"], include_failed=True)
+    assert '"attempt_index": 2' in payload
+    assert "adapt" in payload
