@@ -6,9 +6,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import httpx
+from rich.console import Console
 
 from red_alert.config import DEFAULT_SCENARIO, UsageError, merged_environ, resolve_config
-from red_alert.report import format_report
+from red_alert.display import AttackProgress, print_summary
+from red_alert.models import AttackStep
+from red_alert.report import format_json_report
 from red_alert.runner import run_attack
 
 HTTP_TIMEOUT_SECONDS = 180.0
@@ -33,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     attack.add_argument(
         "--output",
         "-o",
-        help="Записать отчёт в файл в UTF-8 (не через редирект оболочки)",
+        help="Записать JSON-трейсы успешных атак в UTF-8 файл",
     )
     return parser
 
@@ -43,6 +46,8 @@ def main(
     *,
     environ: Mapping[str, str] | None = None,
     http_client: httpx.Client | None = None,
+    console: Console | None = None,
+    progress_console: Console | None = None,
 ) -> int:
     _configure_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -67,24 +72,43 @@ def main(
         print(str(exc), file=sys.stderr)
         return 2
 
+    out = console or Console()
+    log = progress_console or Console(stderr=True)
+
+    def on_step(step: AttackStep) -> None:
+        progress.on_step(current[0], step)
+
+    current = [1]
     owns_client = http_client is None
     client = http_client or httpx.Client(timeout=HTTP_TIMEOUT_SECONDS)
     try:
-        report = run_attack(
-            target=config.target,
-            api_key=config.api_key,
-            victim_api_key=config.victim_api_key,
-            scenario_name=config.scenario,
-            attempts=config.attempts,
-            http_client=client,
-        )
+        with AttackProgress(log, config.attempts) as progress:
+
+            def mark_done(_result: object) -> None:
+                progress.on_attempt_done()
+                current[0] += 1
+
+            report = run_attack(
+                target=config.target,
+                api_key=config.api_key,
+                victim_api_key=config.victim_api_key,
+                scenario_name=config.scenario,
+                attempts=config.attempts,
+                http_client=client,
+                on_step=on_step,
+                on_attempt_done=mark_done,
+            )
     finally:
         if owns_client:
             client.close()
 
-    text = format_report(report, secrets=(config.api_key, config.victim_api_key))
-    print(text)
+    secrets = (config.api_key, config.victim_api_key)
+    print_summary(out, report)
+    json_text = format_json_report(report, secrets=secrets)
     output = getattr(args, "output", None)
     if output:
-        Path(output).write_text(text + "\n", encoding="utf-8")
+        Path(output).write_text(json_text + "\n", encoding="utf-8")
+        out.print(f"JSON: {output}")
+    else:
+        out.print(json_text)
     return 0

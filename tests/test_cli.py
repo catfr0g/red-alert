@@ -79,21 +79,26 @@ class StandMock:
         return httpx.Client(transport=httpx.MockTransport(self.handler))
 
 
-def test_attack_success_prints_asr_and_chain(capsys: pytest.CaptureFixture[str]) -> None:
+def test_attack_success_prints_asr_and_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "attack-report.json"
     stand = StandMock()
-    code = main(attack_cmd(), environ={}, http_client=stand.client())
+    code = main(attack_cmd("--output", str(path)), environ={}, http_client=stand.client())
     output = capsys.readouterr().out
+    report = json.loads(path.read_text(encoding="utf-8"))
+    steps = [step["name"] for step in report["traces"][0]["steps"]]
+    actors = [step["actor"] for step in report["traces"][0]["steps"]]
     assert code == 0
     assert "ASR: 100%" in output
     assert "successful: 1/1" in output
-    assert "step: payload-1" in output
-    assert "step: payload-2" in output
-    assert "actor: attacker" in output
-    assert "step: finalize" in output
-    assert "step: trigger" in output
-    assert "actor: victim" in output
-    assert "scope" in output
-    assert "global" in output
+    assert steps[:2] == ["payload-1", "payload-2"]
+    assert "finalize" in steps
+    assert steps[-1] == "trigger"
+    assert "attacker" in actors
+    assert "victim" in actors
+    assert "scope" in path.read_text(encoding="utf-8")
+    assert "global" in path.read_text(encoding="utf-8")
     bodies = [json.loads(req.content.decode()) for req in stand.requests if req.content]
     assert any(body.get("auth_mode") == "vulnerable" for body in bodies)
 
@@ -198,13 +203,16 @@ def test_output_file_is_utf8_and_masks_secrets(
     captured = capsys.readouterr()
     raw = path.read_bytes()
     text = path.read_text(encoding="utf-8")
+    payload = json.loads(text)
     assert code == 0
     assert raw[:2] != b"\xff\xfe"
-    assert "ASR:" in text
+    assert payload["asr"] == 1.0
+    assert payload["traces"]
     assert "неприемлемый" in text
     assert API_KEY not in text
     assert VICTIM_KEY not in text
-    assert text.strip() == captured.out.strip()
+    assert API_KEY not in captured.out
+    assert "ASR: 100%" in captured.out
 
 
 def test_api_keys_are_masked_in_output(capsys: pytest.CaptureFixture[str]) -> None:
@@ -235,11 +243,12 @@ def test_http_error_stops_chain(capsys: pytest.CaptureFixture[str]) -> None:
     code = main(attack_cmd(), environ={}, http_client=stand.client())
     output = capsys.readouterr().out
     assert code == 0
-    assert "step: payload-1" in output
-    assert "step: payload-2" not in output
-    assert "step: finalize" not in output
-    assert "step: trigger" not in output
+    assert "payload-1" in output
+    assert "payload-2" not in output
+    assert "finalize" not in output
+    assert "trigger" not in output
     assert "HTTP 500" in output
+    assert '"traces": []' in output
     assert len(stand.requests) == 1
 
 

@@ -1,7 +1,7 @@
 import json
 from collections.abc import Sequence
 
-from red_alert.models import RunReport
+from red_alert.models import AttemptResult, RunReport
 
 
 def mask_secrets(text: str, secrets: Sequence[str]) -> str:
@@ -10,7 +10,7 @@ def mask_secrets(text: str, secrets: Sequence[str]) -> str:
     return text
 
 
-def format_report(report: RunReport, *, secrets: Sequence[str]) -> str:
+def format_summary(report: RunReport) -> str:
     asr_percent = f"{report.asr * 100:.0f}%"
     lines = [
         f"scenario: {report.scenario}",
@@ -20,23 +20,43 @@ def format_report(report: RunReport, *, secrets: Sequence[str]) -> str:
     ]
     for attempt in report.attempts:
         status = "success" if attempt.success else "failure"
-        lines.append("")
-        lines.append(f"attempt {attempt.attempt_index}: {status}")
-        for step in attempt.steps:
-            lines.append(f"  step: {step.name}")
-            if step.actor:
-                lines.append(f"  actor: {step.actor}")
-            lines.append(f"  {step.method} {step.url}")
-            if step.request_body is not None:
-                lines.append(f"  request: {_dump(step.request_body)}")
-            if step.status_code is not None:
-                lines.append(f"  status: {step.status_code}")
-            if step.response_body is not None:
-                lines.append(f"  response: {_dump(step.response_body)}")
-            if step.error:
-                lines.append(f"  error: {step.error}")
-    return mask_secrets("\n".join(lines), secrets)
+        extra = _attempt_tail(attempt)
+        line = f"attempt {attempt.attempt_index}: {status}"
+        if extra:
+            line = f"{line}  {extra}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
-def _dump(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, default=str)
+def format_report(report: RunReport, *, secrets: Sequence[str]) -> str:
+    return mask_secrets(format_summary(report), secrets)
+
+
+def format_json_report(report: RunReport, *, secrets: Sequence[str]) -> str:
+    payload = {
+        "scenario": report.scenario,
+        "target": report.target,
+        "successful": report.successful_count,
+        "total": report.total_count,
+        "asr": report.asr,
+        "traces": [
+            {
+                "attempt_index": attempt.attempt_index,
+                "session_a": attempt.session_a,
+                "session_b": attempt.session_b,
+                "steps": [step.model_dump() for step in attempt.steps],
+            }
+            for attempt in report.attempts
+            if attempt.success
+        ],
+    }
+    return mask_secrets(json.dumps(payload, ensure_ascii=False, indent=2, default=str), secrets)
+
+
+def _attempt_tail(attempt: AttemptResult) -> str:
+    if not attempt.steps:
+        return ""
+    last = attempt.steps[-1]
+    if last.error:
+        return f"{last.name} {last.error}"
+    return last.name

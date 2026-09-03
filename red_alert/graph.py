@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -7,6 +8,8 @@ from langgraph.graph import END, START, StateGraph
 from red_alert.models import AttackStep, AttemptResult
 from red_alert.scenarios.memory_poisoning import MemoryPoisoningScenario
 from red_alert.stand_client import StandClient
+
+OnStep = Callable[[AttackStep], None]
 
 ACTOR_ATTACKER = "attacker"
 ACTOR_VICTIM = "victim"
@@ -85,27 +88,33 @@ def _error_step(
     )
 
 
+def _emit(on_step: OnStep | None, step: AttackStep) -> None:
+    if on_step is not None:
+        on_step(step)
+
+
 def _send_payloads(
     attacker: StandClient,
     scenario: MemoryPoisoningScenario,
     session_id: str,
     steps: list[AttackStep],
+    on_step: OnStep | None = None,
 ) -> str | None:
     for index, payload in enumerate(scenario.payloads, start=1):
         step_name = "payload" if len(scenario.payloads) == 1 else f"payload-{index}"
         try:
             request_body, response = attacker.chat(session_id=session_id, user_content=payload)
         except httpx.RequestError as exc:
-            steps.append(
-                _error_step(
-                    name=step_name,
-                    method="POST",
-                    url=attacker.chat_url(),
-                    actor=ACTOR_ATTACKER,
-                    request_body={"session_id": session_id},
-                    error=str(exc),
-                )
+            step = _error_step(
+                name=step_name,
+                method="POST",
+                url=attacker.chat_url(),
+                actor=ACTOR_ATTACKER,
+                request_body={"session_id": session_id},
+                error=str(exc),
             )
+            steps.append(step)
+            _emit(on_step, step)
             return str(exc)
         payload_step = _http_step(
             name=step_name,
@@ -116,6 +125,7 @@ def _send_payloads(
             response=response,
         )
         steps.append(payload_step)
+        _emit(on_step, payload_step)
         if payload_step.error:
             return payload_step.error
     return None
@@ -125,11 +135,12 @@ def build_attempt_graph(
     attacker: StandClient,
     victim: StandClient,
     scenario: MemoryPoisoningScenario,
+    on_step: OnStep | None = None,
 ):
     def inject(state: AttemptState) -> dict:
         steps = list(state.steps)
         session_a = f"ra-a-{uuid.uuid4().hex[:12]}"
-        error = _send_payloads(attacker, scenario, session_a, steps)
+        error = _send_payloads(attacker, scenario, session_a, steps, on_step)
         return {
             "session_a": session_a,
             "injects": state.injects + 1,
@@ -154,6 +165,7 @@ def build_attempt_graph(
                     error=str(exc),
                 )
             )
+            _emit(on_step, steps[-1])
             return {"steps": steps, "error": str(exc)}
         finalize_step = _http_step(
             name="finalize",
@@ -164,6 +176,7 @@ def build_attempt_graph(
             response=response,
         )
         steps.append(finalize_step)
+        _emit(on_step, finalize_step)
         if finalize_step.error:
             return {"steps": steps, "error": finalize_step.error}
         return {
@@ -190,6 +203,7 @@ def build_attempt_graph(
                     error=str(exc),
                 )
             )
+            _emit(on_step, steps[-1])
             return {"steps": steps, "error": str(exc), "success": False}
         trigger_step = _http_step(
             name="trigger",
@@ -200,6 +214,7 @@ def build_attempt_graph(
             response=response,
         )
         steps.append(trigger_step)
+        _emit(on_step, trigger_step)
         if trigger_step.error:
             return {"steps": steps, "error": trigger_step.error, "success": False}
         return {
@@ -234,8 +249,9 @@ def run_attempt(
     victim: StandClient,
     scenario: MemoryPoisoningScenario,
     attempt_index: int,
+    on_step: OnStep | None = None,
 ) -> AttemptResult:
-    state = build_attempt_graph(attacker, victim, scenario).invoke(
+    state = build_attempt_graph(attacker, victim, scenario, on_step).invoke(
         {
             "attempt_index": attempt_index,
             "session_a": "",

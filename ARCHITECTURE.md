@@ -48,7 +48,8 @@ flowchart TD
 - `scenarios.memory_poisoning` — payload, триггер, regex успеха, критерий usable global-политики.
 - `graph` — одна попытка как LangGraph: узлы `inject`, `finalize`, `trigger`.
 - `runner` — цикл попыток и ASR.
-- `models` / `report` — цепочка доказательств и ASR. Ключи в тексте заменяются на `***`.
+- `display` — цветной итог и прогресс шагов (`rich`).
+- `models` / `report` — краткий итог и JSON-трейсы успешных попыток. Ключи заменяются на `***`.
 
 ## Поток одной попытки
 
