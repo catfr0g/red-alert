@@ -2,6 +2,7 @@ import json
 
 import httpx
 
+from red_alert.graph import build_attempt_graph
 from red_alert.runner import run_attack, run_attempt
 from red_alert.scenarios.memory_poisoning import TARGET_TICKER, MemoryPoisoningScenario
 from red_alert.stand_client import StandClient
@@ -9,6 +10,14 @@ from tests.test_cli import StandMock, finalize_response
 
 ATTACKER_KEY = "sk-test-attacker"
 VICTIM_KEY = "sk-test-victim"
+
+
+def test_attempt_graph_has_inject_finalize_trigger() -> None:
+    with httpx.Client() as client:
+        attacker = StandClient("http://localhost:8600", ATTACKER_KEY, client)
+        victim = StandClient("http://localhost:8600", VICTIM_KEY, client)
+        graph = build_attempt_graph(attacker, victim, MemoryPoisoningScenario())
+        assert set(graph.get_graph().nodes) >= {"inject", "finalize", "trigger"}
 
 
 def test_run_attack_rejects_unknown_scenario() -> None:
