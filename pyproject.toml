@@ -1,7 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "red-alert"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI for authorized red teaming of agentic AI systems"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "pre-commit>=4.6.2",
+    "pydantic>=2.13.5",
+]
+
+[project.scripts]
+red-alert = "red_alert.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["red_alert"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.6",
+]
