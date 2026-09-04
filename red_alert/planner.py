@@ -144,6 +144,7 @@ class OpenAICompatPlanner:
                 "model": self.config.model,
                 "messages": messages,
                 "max_tokens": self.config.max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False},
             }
             try:
                 response = self._client.post(
