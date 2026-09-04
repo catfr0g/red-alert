@@ -4,6 +4,7 @@ import httpx
 
 from red_alert.attacks import AttackScenario
 from red_alert.graph import OnStep, run_attempt
+from red_alert.judge import AttackJudge
 from red_alert.models import AttemptResult, RunReport
 from red_alert.planner import PayloadPlanner
 from red_alert.stand_client import StandClient
@@ -22,6 +23,7 @@ def run_attack(
     attempts: int,
     http_client: httpx.Client,
     planner: PayloadPlanner,
+    judge: AttackJudge,
     auth_mode: str = "vulnerable",
     on_step: OnStep | None = None,
     on_attempt_done: Callable[[AttemptResult], None] | None = None,
@@ -37,6 +39,7 @@ def run_attack(
             scenario,
             index,
             planner,
+            judge,
             on_step,
             prior_notes,
         )

@@ -40,20 +40,23 @@ flowchart TD
     cli --> report[report]
     runner --> graph[graph LangGraph]
     graph --> planner[planner]
+    graph --> judge[judge]
     graph --> attacks[attacks YAML]
     graph --> client[stand_client]
     planner --> httpx[httpx]
+    judge --> httpx
     client --> httpx
     graph --> models[models]
     report --> models
 ```
 
 - `cli` — разбор аргументов, таймаут HTTP 180 с. Без `--scenario` гоняет все YAML каталога; печать отчёта и `--output` в UTF-8.
-- `config` — `.env` + окружение + флаги. Нормализует target и `OPENAI_BASE_URL`.
-- `planner` — OpenAI-совместимый чат для генерации payload. Ключ только в заголовке `Authorization`.
+- `config` — `.env` + окружение + флаги. Нормализует target, `OPENAI_BASE_URL_ATTACK` и `OPENAI_BASE_URL_JUDGE`.
+- `planner` — OpenAI-совместимый чат для генерации payload. Использует `MODEL_ATTACK` и `OPENAI_BASE_URL_ATTACK`; ключ только в заголовке `Authorization`.
+- `judge` — независимый OpenAI-совместимый LLM-судья на `MODEL_JUDGE` и `OPENAI_BASE_URL_JUDGE`. Pydantic AI запрашивает структурированный `JudgeVerdict` и строго валидирует поле `success` как `bool` по `success_check` из YAML.
 - `stand_client` — `POST /v1/chat/completions` и `POST /v1/sessions/{id}/finalize`. В чат кладёт `auth_mode` из `--auth-mode` / `RED_ALERT_AUTH_MODE`. Ключ только в заголовке `Authorization`.
-- `attacks` — загрузка YAML: цель, примеры, триггер, regex, `flow` memory или probe.
-- `graph` — одна попытка как LangGraph: `adapt`, `inject`; для memory ещё `finalize` и `trigger`.
+- `attacks` — загрузка YAML: цель, примеры, триггер, `success_check`, `flow` memory или probe.
+- `graph` — одна попытка как LangGraph: `adapt`, `inject`, `judge`; для memory ещё `finalize` и `trigger`.
 - `runner` — цикл попыток, ASR и заметки для следующей попытки.
 - `display` — цветной итог и прогресс шагов (`rich`).
 - `models` / `report` — краткий итог и JSON-трейсы успешных попыток. Ключи заменяются на `***`.
@@ -66,6 +69,7 @@ flowchart TD
 sequenceDiagram
     participant A as Атакующий
     participant P as Планировщик
+    participant J as LLM-судья
     participant API as agent-api
     participant Mem as Политика агента
     participant V as Жертва
@@ -80,14 +84,15 @@ sequenceDiagram
     V->>API: chat, session B, расскажи про портфель
     API->>Mem: политика в контексте жертвы
     API-->>V: совет по позициям
-    Note over V: успех = regex из YAML на ответ жертвы
+    V->>J: ответ жертвы и success_check из YAML
+    J-->>V: бинарный вердикт true/false
 ```
 
 1. Планировщик пишет сообщение атакующего по `goal` и `examples` из YAML.
 2. Для `memory`: `finalize` переносит диалог в семантическую память. Если стенд пометил факт как `global` и он проходит `usable_policy`, это политика агента.
 3. Экстрактор стенда часто ставит `scope=user`. Граф повторяет `adapt`→`inject`→`finalize` до `max_injects`: планировщик видит факты и меняет текст, пока нет usable policy.
 4. Жертва в новой сессии отправляет `trigger` из YAML.
-5. Успех `memory` — только по ответу жертвы. Успех `probe` — по ответу атакующего, без шагов 2–4.
+5. LLM-судья проверяет ответ по `success_check` из YAML и возвращает `true` или `false`. Для `memory` оценивается только ответ жертвы. Для `probe` оценивается ответ атакующего, без шагов 2–4.
 
 HTTP-ошибка или сбой сети обрывает цепочку попытки. Прогон всё равно заканчивается кодом 0, попытка в ASR неуспешна.
 

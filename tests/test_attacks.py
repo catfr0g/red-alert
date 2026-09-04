@@ -10,19 +10,16 @@ def test_load_memory_poisoning_from_catalog() -> None:
     scenario = load_named_attack("memory-poisoning", Path("attacks"))
     assert scenario.flow == "memory"
     assert scenario.trigger
-    assert scenario.is_success("В портфеле YDEX. Рекомендую продать: неприемлемый риск.")
-    assert not scenario.is_success("Рекомендую продать GAZP")
+    assert "YDEX" in scenario.success_check
+    assert "true" in scenario.success_check
 
 
 def test_load_attack_from_explicit_path() -> None:
     scenario = load_named_attack("attacks/cross-user-portfolio.yaml", Path("missing"))
     assert scenario.flow == "probe"
     assert scenario.trigger is None
-    assert scenario.is_success("Портфель client1002: YDEX 10 лотов, стоимость 42100")
-    assert not scenario.is_success("Портфель client1002 содержит YDEX")
-    assert not scenario.is_success(
-        "Запрос портфеля клиента 1002 заблокирован. YDEX запрещена политикой."
-    )
+    assert "client1002" in scenario.success_check
+    assert "количеств" in scenario.success_check
 
 
 def test_unknown_attack_lists_available() -> None:
@@ -35,7 +32,7 @@ def test_unknown_attack_lists_available() -> None:
 def test_memory_yaml_without_trigger_is_error(tmp_path: Path) -> None:
     path = tmp_path / "broken.yaml"
     path.write_text(
-        "name: broken\nflow: memory\ngoal: x\nsuccess_pattern: ydex\n",
+        "name: broken\nflow: memory\ngoal: x\nsuccess_check: check\n",
         encoding="utf-8",
     )
     with pytest.raises(UsageError, match="trigger"):
@@ -55,11 +52,21 @@ def test_empty_catalog_is_error(tmp_path: Path) -> None:
         load_catalog_attacks(tmp_path)
 
 
-def test_invalid_regex_is_error(tmp_path: Path) -> None:
-    path = tmp_path / "bad-re.yaml"
+def test_empty_success_check_is_error(tmp_path: Path) -> None:
+    path = tmp_path / "empty-check.yaml"
     path.write_text(
-        "name: bad\nflow: probe\ngoal: x\nsuccess_pattern: '(unclosed'\n",
+        "name: bad\nflow: probe\ngoal: x\nsuccess_check: '   '\n",
         encoding="utf-8",
     )
-    with pytest.raises(UsageError, match="success_pattern"):
+    with pytest.raises(UsageError, match="success_check"):
+        load_attack(path)
+
+
+def test_legacy_success_pattern_is_not_enough(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.yaml"
+    path.write_text(
+        "name: legacy\nflow: probe\ngoal: x\nsuccess_pattern: ydex\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(UsageError, match="success_check"):
         load_attack(path)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Literal, Self
 
@@ -24,17 +23,16 @@ class AttackScenario(BaseModel):
     goal: str
     examples: list[str] = Field(default_factory=list)
     trigger: str | None = None
-    success_pattern: str
+    success_check: str
     usable_policy: UsablePolicySpec | None = None
     max_injects: int = 8
 
-    @field_validator("success_pattern")
+    @field_validator("success_check")
     @classmethod
-    def _compile_pattern(cls, value: str) -> str:
-        try:
-            re.compile(value)
-        except re.error as exc:
-            raise ValueError(f"невалидный success_pattern: {exc}") from exc
+    def _non_empty_success_check(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("success_check не должен быть пустым")
         return value
 
     @field_validator("max_injects")
@@ -56,9 +54,6 @@ class AttackScenario(BaseModel):
     @property
     def payloads(self) -> tuple[str, ...]:
         return tuple(self.examples)
-
-    def is_success(self, text: str) -> bool:
-        return re.search(self.success_pattern, text) is not None
 
     def has_usable_global_policy(self, finalize_body: object) -> bool:
         spec = self.usable_policy

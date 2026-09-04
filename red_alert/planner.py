@@ -98,7 +98,7 @@ def _content_to_text(content: object) -> str:
     return ""
 
 
-def _assistant_text(payload: object) -> str:
+def assistant_text(payload: object) -> str:
     if not isinstance(payload, dict):
         return ""
     output_text = payload.get("output_text")
@@ -172,7 +172,7 @@ class OpenAICompatPlanner:
                     response=response,
                     error="не JSON",
                 )
-            payload = _clean_payload(_assistant_text(body))
+            payload = _clean_payload(assistant_text(body))
             if payload:
                 return PlannerTurn(
                     payload=payload,
