@@ -42,6 +42,7 @@ def test_planner_prompt_includes_feedback() -> None:
     assert "scope" in user
     assert "попытка 1" in user
     assert messages[0]["role"] == "system"
+    assert "YDEX" not in messages[0]["content"]
 
 
 def test_clean_payload_strips_fences_and_quotes() -> None:

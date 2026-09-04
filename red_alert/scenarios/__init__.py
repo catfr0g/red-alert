@@ -1,3 +1,3 @@
-from red_alert.scenarios.memory_poisoning import MemoryPoisoningScenario
+from red_alert.attacks import AttackScenario
 
-__all__ = ["MemoryPoisoningScenario"]
+__all__ = ["AttackScenario"]

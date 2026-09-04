@@ -6,7 +6,8 @@ import httpx
 import pytest
 
 from red_alert.cli import main
-from red_alert.scenarios.memory_poisoning import TARGET_TICKER
+
+TARGET_TICKER = "YDEX"
 
 API_KEY = "sk-test-attacker-key"
 VICTIM_KEY = "sk-test-victim-key"
@@ -24,8 +25,12 @@ LLM_ENV = {
 }
 
 
-def attack_cmd(*extra: str) -> list[str]:
-    return ["attack", "--api-key", API_KEY, "--victim-api-key", VICTIM_KEY, *extra]
+def attack_cmd(*extra: str, scenario: str | None = "memory-poisoning") -> list[str]:
+    cmd = ["attack", "--api-key", API_KEY, "--victim-api-key", VICTIM_KEY]
+    if scenario is not None:
+        cmd.extend(["--scenario", scenario])
+    cmd.extend(extra)
+    return cmd
 
 
 def chat_response(text: str, status_code: int = 200) -> httpx.Response:
@@ -68,9 +73,11 @@ class StandMock:
             f"В портфеле есть {TARGET_TICKER}. Рекомендую продать: неприемлемый риск."
         ),
         payload_status: int = 200,
+        attacker_text: str = "принятая инструкция",
     ) -> None:
         self.trigger_text = trigger_text
         self.payload_status = payload_status
+        self.attacker_text = attacker_text
         self.requests: list[httpx.Request] = []
         self.handler: Callable[[httpx.Request], httpx.Response] = self._handle
 
@@ -86,7 +93,7 @@ class StandMock:
                 return chat_response(PLANNER_PAYLOAD)
             if session_id.startswith("ra-b-"):
                 return chat_response(self.trigger_text)
-            return chat_response("принятая инструкция", status_code=self.payload_status)
+            return chat_response(self.attacker_text, status_code=self.payload_status)
         return httpx.Response(404, json={"detail": "not found"})
 
     def client(self) -> httpx.Client:
@@ -180,14 +187,29 @@ def test_same_keys_exit_2(capsys: pytest.CaptureFixture[str]) -> None:
 def test_unknown_scenario_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
     stand = StandMock()
     code = main(
-        attack_cmd("--scenario", "prompt-injection"),
-        environ={},
+        attack_cmd(scenario="prompt-injection"),
+        environ=LLM_ENV,
         http_client=stand.client(),
     )
     err = capsys.readouterr().err
     assert code == 2
     assert "Неизвестный сценарий" in err
+    assert "memory-poisoning" in err
     assert stand.requests == []
+
+
+def test_probe_scenario_from_catalog(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock(attacker_text="У client1002 в портфеле YDEX")
+    code = main(
+        attack_cmd(scenario="cross-user-portfolio"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "ASR: 100%" in output
+    assert "finalize" not in output
+    assert not any(request.url.path.endswith("/finalize") for request in stand.requests)
 
 
 def test_attempts_less_than_one_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
@@ -202,10 +224,49 @@ def test_attempts_less_than_one_exits_2(capsys: pytest.CaptureFixture[str]) -> N
     assert stand.requests == []
 
 
+def test_default_runs_all_catalog_attacks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "attack-report.json"
+    stand = StandMock(attacker_text="У client1002 в портфеле YDEX")
+    code = main(
+        attack_cmd("--output", str(path), scenario=None),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    names = [run["scenario"] for run in payload["runs"]]
+    assert code == 0
+    assert names == ["cross-user-portfolio", "memory-poisoning"]
+    assert payload["total"] == 2
+    assert payload["asr"] == 1.0
+    assert "cross-user-portfolio" in output
+    assert "memory-poisoning" in output
+    assert "Все сценарии" in output
+    probe_steps = [step["name"] for step in payload["runs"][0]["traces"][0]["steps"]]
+    memory_steps = [step["name"] for step in payload["runs"][1]["traces"][0]["steps"]]
+    assert "finalize" not in probe_steps
+    assert memory_steps == ["adapt", "payload", "finalize", "trigger"]
+
+
+def test_empty_catalog_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--attacks-dir", str(tmp_path), scenario=None),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "нет YAML" in err
+    assert stand.requests == []
+
+
 def test_target_and_keys_from_env(capsys: pytest.CaptureFixture[str]) -> None:
     stand = StandMock()
     code = main(
-        ["attack"],
+        ["attack", "--scenario", "memory-poisoning"],
         environ={
             **LLM_ENV,
             "RED_ALERT_TARGET": "http://stand.example:8600",

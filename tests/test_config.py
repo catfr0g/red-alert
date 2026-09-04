@@ -57,6 +57,7 @@ def test_resolve_config_accepts_full_chat_url() -> None:
     assert config.max_tokens == DEFAULT_MAX_TOKENS
     assert config.model == "openai/gpt-5-mini"
     assert config.debug is False
+    assert config.attacks_dir.name == "attacks"
 
 
 def test_resolve_config_reads_llm_overrides() -> None:
@@ -111,3 +112,28 @@ def test_resolve_config_debug_from_env() -> None:
         environ={**LLM_ENV, "RED_ALERT_DEBUG": "yes"},
     )
     assert config.debug is True
+
+
+def test_resolve_config_attacks_dir_from_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_ATTACKS_DIR": "custom-attacks"},
+    )
+    assert config.attacks_dir == Path("custom-attacks")
+
+
+def test_resolve_config_attacks_dir_flag_overrides_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_ATTACKS_DIR": "from-env"},
+        attacks_dir="from-flag",
+    )
+    assert config.attacks_dir == Path("from-flag")

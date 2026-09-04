@@ -1,5 +1,7 @@
+import json
+
 from red_alert.models import AttackStep, AttemptResult, RunReport
-from red_alert.report import format_json_report, format_report, mask_secrets
+from red_alert.report import format_json_report, format_json_reports, format_report, mask_secrets
 
 
 def test_asr_all_success() -> None:
@@ -121,3 +123,39 @@ def test_json_report_includes_failed_traces_when_asked() -> None:
     payload = format_json_report(report, secrets=["sk-secret"], include_failed=True)
     assert '"attempt_index": 2' in payload
     assert "adapt" in payload
+
+
+def test_json_reports_wraps_multiple_runs() -> None:
+    reports = [
+        RunReport(
+            scenario="cross-user-portfolio",
+            target="http://localhost:8600",
+            attempts=[AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1")],
+        ),
+        RunReport(
+            scenario="memory-poisoning",
+            target="http://localhost:8600",
+            attempts=[
+                AttemptResult(attempt_index=1, success=False, session_a="a2", session_b="b2")
+            ],
+        ),
+    ]
+    payload = json.loads(format_json_reports(reports, secrets=["sk-secret"]))
+    assert payload["total"] == 2
+    assert payload["successful"] == 1
+    assert payload["asr"] == 0.5
+    assert [item["scenario"] for item in payload["runs"]] == [
+        "cross-user-portfolio",
+        "memory-poisoning",
+    ]
+
+
+def test_json_reports_single_keeps_flat_shape() -> None:
+    report = RunReport(
+        scenario="memory-poisoning",
+        target="http://localhost:8600",
+        attempts=[AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1")],
+    )
+    payload = json.loads(format_json_reports([report], secrets=["sk-secret"]))
+    assert payload["scenario"] == "memory-poisoning"
+    assert "runs" not in payload

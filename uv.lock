@@ -664,6 +664,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "pre-commit" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -679,6 +680,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pydantic", specifier = ">=2.13.5" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=15.0.0" },
 ]
 

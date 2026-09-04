@@ -19,7 +19,14 @@ from red_alert.report import mask_secrets
 
 
 class AttackProgress:
-    def __init__(self, console: Console, attempts: int) -> None:
+    def __init__(
+        self,
+        console: Console,
+        attempts: int,
+        scenario: str,
+        *,
+        total: int | None = None,
+    ) -> None:
         self._progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold cyan]{task.fields[phase]}"),
@@ -30,16 +37,27 @@ class AttackProgress:
             transient=False,
         )
         self._attempts = attempts
+        self._scenario = scenario
+        self._total = total if total is not None else attempts
         self._task_id: TaskID | None = None
+
+    def _phase(self, suffix: str) -> str:
+        return f"{self._scenario} · {suffix}"
 
     def __enter__(self) -> "AttackProgress":
         self._progress.start()
         self._task_id = self._progress.add_task(
             "attack",
-            total=self._attempts,
-            phase="Ожидание",
+            total=self._total,
+            phase=self._phase("ожидание"),
         )
         return self
+
+    def set_scenario(self, scenario: str) -> None:
+        self._scenario = scenario
+        if self._task_id is None:
+            return
+        self._progress.update(self._task_id, phase=self._phase("ожидание"))
 
     def __exit__(self, *exc: object) -> None:
         self._progress.stop()
@@ -50,7 +68,7 @@ class AttackProgress:
         actor = f" · {step.actor}" if step.actor else ""
         self._progress.update(
             self._task_id,
-            phase=f"Попытка {attempt_index}/{self._attempts} · {step.name}{actor}",
+            phase=self._phase(f"попытка {attempt_index}/{self._attempts} · {step.name}{actor}"),
         )
 
     def on_attempt_done(self) -> None:
@@ -81,6 +99,26 @@ def print_debug_step(
 
 def _pretty_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def print_summaries(console: Console, reports: Sequence[RunReport]) -> None:
+    for report in reports:
+        print_summary(console, report)
+    if len(reports) < 2:
+        return
+    successful = sum(item.successful_count for item in reports)
+    total = sum(item.total_count for item in reports)
+    asr = successful / total if total else 0.0
+    asr_percent = f"{asr * 100:.0f}%"
+    asr_style = "bold green" if successful else "bold red"
+    table = Table(title="Все сценарии", show_header=False, box=None, padding=(0, 2))
+    table.add_row("scenarios", str(len(reports)))
+    table.add_row("successful", f"{successful}/{total}")
+    table.add_row(Text("ASR", style=asr_style), Text(asr_percent, style=asr_style))
+    console.print(table)
+    console.print()
+    console.print(f"ASR: {asr_percent}")
+    console.print(f"successful: {successful}/{total}")
 
 
 def print_summary(console: Console, report: RunReport) -> None:

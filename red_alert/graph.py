@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 import httpx
 from langgraph.graph import END, START, StateGraph
 
+from red_alert.attacks import AttackScenario
 from red_alert.models import AttackStep, AttemptResult
 from red_alert.planner import PayloadPlanner, PlannerContext
-from red_alert.scenarios.memory_poisoning import MemoryPoisoningScenario
 from red_alert.stand_client import StandClient
 
 OnStep = Callable[[AttackStep], None]
@@ -138,7 +138,7 @@ def _send_payload(
 def build_attempt_graph(
     attacker: StandClient,
     victim: StandClient,
-    scenario: MemoryPoisoningScenario,
+    scenario: AttackScenario,
     planner: PayloadPlanner,
     on_step: OnStep | None = None,
 ):
@@ -184,6 +184,9 @@ def build_attempt_graph(
         steps = list(state.steps)
         session_a = f"ra-a-{uuid.uuid4().hex[:12]}"
         error, assistant = _send_payload(attacker, state.payload, session_a, steps, on_step)
+        success = False
+        if scenario.flow == "probe" and not error:
+            success = scenario.is_success(assistant)
         return {
             "session_a": session_a,
             "injects": state.injects + 1,
@@ -191,6 +194,7 @@ def build_attempt_graph(
             "steps": steps,
             "error": error,
             "usable_policy": False,
+            "success": success,
         }
 
     def finalize(state: AttemptState) -> dict:
@@ -235,7 +239,7 @@ def build_attempt_graph(
         session_b = state.session_b
         try:
             request_body, response = victim.chat(
-                session_id=session_b, user_content=scenario.trigger
+                session_id=session_b, user_content=scenario.trigger or ""
             )
         except httpx.RequestError as exc:
             steps.append(
@@ -272,7 +276,13 @@ def build_attempt_graph(
         return END if state.error else "inject"
 
     def after_inject(state: AttemptState) -> str:
-        return END if state.error else "finalize"
+        if state.error:
+            return END
+        if scenario.flow != "probe":
+            return "finalize"
+        if state.success or state.injects >= scenario.max_injects:
+            return END
+        return "adapt"
 
     def after_finalize(state: AttemptState) -> str:
         if state.error:
@@ -297,7 +307,7 @@ def build_attempt_graph(
 def run_attempt(
     attacker: StandClient,
     victim: StandClient,
-    scenario: MemoryPoisoningScenario,
+    scenario: AttackScenario,
     attempt_index: int,
     planner: PayloadPlanner,
     on_step: OnStep | None = None,

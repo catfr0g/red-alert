@@ -3,9 +3,7 @@ from os import environ as os_environ
 from pathlib import Path
 from typing import Mapping
 
-ALLOWED_SCENARIOS = frozenset({"memory-poisoning"})
 DEFAULT_TARGET = "http://localhost:8600"
-DEFAULT_SCENARIO = "memory-poisoning"
 DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MAX_TOKENS = 2048
 CHAT_COMPLETIONS_SUFFIX = "/v1/chat/completions"
@@ -21,13 +19,14 @@ class AppConfig:
     target: str
     api_key: str
     victim_api_key: str
-    scenario: str
+    scenario: str | None
     attempts: int
     openai_api_key: str
     openai_base_url: str
     model: str
     max_tokens: int
     debug: bool
+    attacks_dir: Path
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -78,10 +77,11 @@ def resolve_config(
     target: str | None,
     api_key: str | None,
     victim_api_key: str | None,
-    scenario: str,
+    scenario: str | None,
     attempts: int,
     environ: Mapping[str, str],
     debug: bool = False,
+    attacks_dir: str | None = None,
 ) -> AppConfig:
     resolved_key = api_key or environ.get("RED_ALERT_API_KEY")
     if not resolved_key:
@@ -98,10 +98,6 @@ def resolve_config(
     resolved_target = target or environ.get("RED_ALERT_TARGET") or DEFAULT_TARGET
     resolved_target = normalize_target(resolved_target)
 
-    if scenario not in ALLOWED_SCENARIOS:
-        raise UsageError(
-            f"Неизвестный сценарий: {scenario}. Допустимо: {', '.join(sorted(ALLOWED_SCENARIOS))}"
-        )
     if attempts < 1:
         raise UsageError("--attempts должен быть >= 1")
 
@@ -122,15 +118,24 @@ def resolve_config(
 
     openai_base_url = normalize_llm_base(environ.get("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL)
 
+    raw_dir = attacks_dir or environ.get("RED_ALERT_ATTACKS_DIR")
+    if raw_dir:
+        resolved_attacks_dir = Path(raw_dir)
+    else:
+        cwd_attacks = Path.cwd() / "attacks"
+        packaged = Path(__file__).resolve().parent.parent / "attacks"
+        resolved_attacks_dir = cwd_attacks if cwd_attacks.is_dir() else packaged
+
     return AppConfig(
         target=resolved_target,
         api_key=resolved_key,
         victim_api_key=resolved_victim,
-        scenario=scenario,
+        scenario=scenario or None,
         attempts=attempts,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
         model=model,
         max_tokens=max_tokens,
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
+        attacks_dir=resolved_attacks_dir,
     )

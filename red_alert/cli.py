@@ -8,11 +8,12 @@ from pathlib import Path
 import httpx
 from rich.console import Console
 
-from red_alert.config import DEFAULT_SCENARIO, UsageError, merged_environ, resolve_config
-from red_alert.display import AttackProgress, print_debug_step, print_summary
+from red_alert.attacks import AttackScenario, load_catalog_attacks, load_named_attack
+from red_alert.config import UsageError, merged_environ, resolve_config
+from red_alert.display import AttackProgress, print_debug_step, print_summaries
 from red_alert.models import AttackStep, RunReport
 from red_alert.planner import LlmConfig, OpenAICompatPlanner
-from red_alert.report import format_json_report
+from red_alert.report import format_json_reports
 from red_alert.runner import run_attack
 
 HTTP_TIMEOUT_SECONDS = 180.0
@@ -32,8 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
     attack.add_argument("--target", help="Базовый URL agent-api")
     attack.add_argument("--api-key", help="Bearer-ключ атакующего")
     attack.add_argument("--victim-api-key", help="Bearer-ключ другого пользователя стенда")
-    attack.add_argument("--scenario", default=DEFAULT_SCENARIO, help="Имя сценария")
-    attack.add_argument("--attempts", type=int, default=1, help="Число попыток для ASR")
+    attack.add_argument(
+        "--scenario",
+        help="Имя YAML или путь к файлу. Без флага — все атаки каталога",
+    )
+    attack.add_argument("--attacks-dir", help="Каталог с YAML-атаками")
+    attack.add_argument("--attempts", type=int, default=1, help="Число попыток каждого сценария")
     attack.add_argument(
         "--output",
         "-o",
@@ -45,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Полный лог всех шагов на stderr и traces всех попыток",
     )
     return parser
+
+
+def _load_scenarios(scenario: str | None, attacks_dir: Path) -> list[AttackScenario]:
+    if scenario:
+        return [load_named_attack(scenario, attacks_dir)]
+    return load_catalog_attacks(attacks_dir)
 
 
 def main(
@@ -74,7 +85,9 @@ def main(
             attempts=args.attempts,
             environ=env,
             debug=args.debug,
+            attacks_dir=args.attacks_dir,
         )
+        scenarios = _load_scenarios(config.scenario, config.attacks_dir)
     except UsageError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -110,30 +123,45 @@ def main(
             client,
         )
 
-        def run() -> RunReport:
-            return run_attack(
-                target=config.target,
-                api_key=config.api_key,
-                victim_api_key=config.victim_api_key,
-                scenario_name=config.scenario,
-                attempts=config.attempts,
-                http_client=client,
-                planner=planner,
-                on_step=on_step,
-                on_attempt_done=mark_done,
-            )
+        def run_all() -> list[RunReport]:
+            reports: list[RunReport] = []
+            for scenario in scenarios:
+                current[0] = 1
+                if progress is not None:
+                    progress.set_scenario(scenario.name)
+                if config.debug:
+                    log.print(f"[bold yellow]debug[/] scenario {scenario.name}")
+                reports.append(
+                    run_attack(
+                        target=config.target,
+                        api_key=config.api_key,
+                        victim_api_key=config.victim_api_key,
+                        scenario=scenario,
+                        attempts=config.attempts,
+                        http_client=client,
+                        planner=planner,
+                        on_step=on_step,
+                        on_attempt_done=mark_done,
+                    )
+                )
+            return reports
 
         if config.debug:
-            report = run()
+            reports = run_all()
         else:
-            with AttackProgress(log, config.attempts) as progress:
-                report = run()
+            with AttackProgress(
+                log,
+                config.attempts,
+                scenarios[0].name,
+                total=config.attempts * len(scenarios),
+            ) as progress:
+                reports = run_all()
     finally:
         if owns_client:
             client.close()
 
-    print_summary(out, report)
-    json_text = format_json_report(report, secrets=secrets, include_failed=config.debug)
+    print_summaries(out, reports)
+    json_text = format_json_reports(reports, secrets=secrets, include_failed=config.debug)
     output = getattr(args, "output", None)
     if output:
         Path(output).write_text(json_text + "\n", encoding="utf-8")
