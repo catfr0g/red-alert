@@ -51,7 +51,7 @@ flowchart TD
 - `cli` — разбор аргументов, таймаут HTTP 180 с. Без `--scenario` гоняет все YAML каталога; печать отчёта и `--output` в UTF-8.
 - `config` — `.env` + окружение + флаги. Нормализует target и `OPENAI_BASE_URL`.
 - `planner` — OpenAI-совместимый чат для генерации payload. Ключ только в заголовке `Authorization`.
-- `stand_client` — `POST /v1/chat/completions` и `POST /v1/sessions/{id}/finalize`. Всегда `auth_mode=vulnerable`. Ключ только в заголовке `Authorization`.
+- `stand_client` — `POST /v1/chat/completions` и `POST /v1/sessions/{id}/finalize`. В чат кладёт `auth_mode` из `--auth-mode` / `RED_ALERT_AUTH_MODE`. Ключ только в заголовке `Authorization`.
 - `attacks` — загрузка YAML: цель, примеры, триггер, regex, `flow` memory или probe.
 - `graph` — одна попытка как LangGraph: `adapt`, `inject`; для memory ещё `finalize` и `trigger`.
 - `runner` — цикл попыток, ASR и заметки для следующей попытки.

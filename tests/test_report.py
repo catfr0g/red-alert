@@ -16,6 +16,7 @@ def test_asr_all_success() -> None:
     text = format_report(report, secrets=["secret"])
     assert "successful: 2/2" in text
     assert "ASR: 100%" in text
+    assert "auth_mode: vulnerable" in text
 
 
 def test_asr_partial() -> None:
@@ -158,4 +159,5 @@ def test_json_reports_single_keeps_flat_shape() -> None:
     )
     payload = json.loads(format_json_reports([report], secrets=["sk-secret"]))
     assert payload["scenario"] == "memory-poisoning"
+    assert payload["auth_mode"] == "vulnerable"
     assert "runs" not in payload

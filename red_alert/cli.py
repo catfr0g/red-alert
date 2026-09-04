@@ -38,6 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Имя YAML или путь к файлу. Без флага — все атаки каталога",
     )
     attack.add_argument("--attacks-dir", help="Каталог с YAML-атаками")
+    attack.add_argument(
+        "--auth-mode",
+        help="Режим стенда: vulnerable, protected или both",
+    )
     attack.add_argument("--attempts", type=int, default=1, help="Число попыток каждого сценария")
     attack.add_argument(
         "--output",
@@ -86,6 +90,7 @@ def main(
             environ=env,
             debug=args.debug,
             attacks_dir=args.attacks_dir,
+            auth_mode=args.auth_mode,
         )
         scenarios = _load_scenarios(config.scenario, config.attacks_dir)
     except UsageError as exc:
@@ -126,34 +131,38 @@ def main(
         def run_all() -> list[RunReport]:
             reports: list[RunReport] = []
             for scenario in scenarios:
-                current[0] = 1
-                if progress is not None:
-                    progress.set_scenario(scenario.name)
-                if config.debug:
-                    log.print(f"[bold yellow]debug[/] scenario {scenario.name}")
-                reports.append(
-                    run_attack(
-                        target=config.target,
-                        api_key=config.api_key,
-                        victim_api_key=config.victim_api_key,
-                        scenario=scenario,
-                        attempts=config.attempts,
-                        http_client=client,
-                        planner=planner,
-                        on_step=on_step,
-                        on_attempt_done=mark_done,
+                for auth_mode in config.auth_modes:
+                    current[0] = 1
+                    label = f"{scenario.name} · {auth_mode}"
+                    if progress is not None:
+                        progress.set_scenario(label)
+                    if config.debug:
+                        log.print(f"[bold yellow]debug[/] scenario {label}")
+                    reports.append(
+                        run_attack(
+                            target=config.target,
+                            api_key=config.api_key,
+                            victim_api_key=config.victim_api_key,
+                            scenario=scenario,
+                            attempts=config.attempts,
+                            http_client=client,
+                            planner=planner,
+                            auth_mode=auth_mode,
+                            on_step=on_step,
+                            on_attempt_done=mark_done,
+                        )
                     )
-                )
             return reports
 
         if config.debug:
             reports = run_all()
         else:
+            first_label = f"{scenarios[0].name} · {config.auth_modes[0]}"
             with AttackProgress(
                 log,
                 config.attempts,
-                scenarios[0].name,
-                total=config.attempts * len(scenarios),
+                first_label,
+                total=config.attempts * len(scenarios) * len(config.auth_modes),
             ) as progress:
                 reports = run_all()
     finally:

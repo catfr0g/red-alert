@@ -38,6 +38,7 @@ uv run pre-commit install
 | Планировщик | `MAX_TOKENS` | Лимит ответа планировщика, по умолчанию `2048` |
 | Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — все файлы в каталоге |
 | Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с атаками, по умолчанию `attacks/` |
+| Режим стенда | `--auth-mode` / `RED_ALERT_AUTH_MODE` | `vulnerable`, `protected` или `both` |
 | Попытки | `--attempts` | Число прогонов для ASR |
 | Отчёт | `--output` / `-o` | JSON с трейсами успешных атак (UTF-8) |
 | Debug | `--debug` / `RED_ALERT_DEBUG` | Полный лог шагов на stderr; в JSON все попытки |
@@ -48,7 +49,15 @@ uv run pre-commit install
 uv run red-alert attack --output attack-report.json --attempts 3
 ```
 
-Без `--scenario` CLI проходит все YAML в `attacks/` по алфавиту. `--attempts` — число попыток **каждого** сценария. В баре видно текущее имя.
+Без `--scenario` CLI проходит все YAML в `attacks/` по алфавиту. `--attempts` — число попыток **каждого** сценария. В баре видно текущее имя и режим стенда.
+
+Чтобы сравнить дырявый и защищённый режим стенда:
+
+```bash
+uv run red-alert attack --auth-mode both --output attack-report.json --attempts 3
+```
+
+Сначала все выбранные атаки идут с `auth_mode=vulnerable`, затем те же — с `protected`. В итоге будет ASR по каждому режиму.
 
 В терминале — цветной прогресс и краткий ASR. Трейсы успешных попыток пишутся в JSON. Без `--output` JSON печатается в stdout. Не редиректите `>` в PowerShell: получится UTF-16.
 

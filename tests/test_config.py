@@ -8,6 +8,7 @@ from red_alert.config import (
     normalize_llm_base,
     normalize_target,
     read_env_file,
+    resolve_auth_modes,
     resolve_config,
 )
 
@@ -58,6 +59,7 @@ def test_resolve_config_accepts_full_chat_url() -> None:
     assert config.model == "openai/gpt-5-mini"
     assert config.debug is False
     assert config.attacks_dir.name == "attacks"
+    assert config.auth_modes == ("vulnerable",)
 
 
 def test_resolve_config_reads_llm_overrides() -> None:
@@ -137,3 +139,34 @@ def test_resolve_config_attacks_dir_flag_overrides_env() -> None:
         attacks_dir="from-flag",
     )
     assert config.attacks_dir == Path("from-flag")
+
+
+def test_resolve_auth_modes() -> None:
+    assert resolve_auth_modes(None) == ("vulnerable",)
+    assert resolve_auth_modes("protected") == ("protected",)
+    assert resolve_auth_modes("BOTH") == ("vulnerable", "protected")
+
+
+def test_resolve_config_auth_mode_from_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_AUTH_MODE": "protected"},
+    )
+    assert config.auth_modes == ("protected",)
+
+
+def test_resolve_config_auth_mode_flag_overrides_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_AUTH_MODE": "protected"},
+        auth_mode="vulnerable",
+    )
+    assert config.auth_modes == ("vulnerable",)

@@ -1,11 +1,19 @@
 import httpx
 
-AUTH_MODE = "vulnerable"
+DEFAULT_AUTH_MODE = "vulnerable"
 
 
 class StandClient:
-    def __init__(self, target: str, api_key: str, client: httpx.Client) -> None:
+    def __init__(
+        self,
+        target: str,
+        api_key: str,
+        client: httpx.Client,
+        *,
+        auth_mode: str = DEFAULT_AUTH_MODE,
+    ) -> None:
         self.target = target.rstrip("/")
+        self.auth_mode = auth_mode
         self._client = client
         self._headers = {
             "Authorization": f"Bearer {api_key}",
@@ -23,7 +31,7 @@ class StandClient:
         body = {
             "messages": [{"role": "user", "content": user_content}],
             "session_id": session_id,
-            "auth_mode": AUTH_MODE,
+            "auth_mode": self.auth_mode,
         }
         response = self._client.post(url, json=body, headers=self._headers)
         return body, response

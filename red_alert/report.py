@@ -15,6 +15,7 @@ def format_summary(report: RunReport) -> str:
     lines = [
         f"scenario: {report.scenario}",
         f"target: {report.target}",
+        f"auth_mode: {report.auth_mode}",
         f"successful: {report.successful_count}/{report.total_count}",
         f"ASR: {asr_percent}",
     ]
@@ -36,6 +37,7 @@ def report_payload(report: RunReport, *, include_failed: bool = False) -> dict:
     return {
         "scenario": report.scenario,
         "target": report.target,
+        "auth_mode": report.auth_mode,
         "successful": report.successful_count,
         "total": report.total_count,
         "asr": report.asr,

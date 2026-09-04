@@ -117,6 +117,17 @@ def print_summaries(console: Console, reports: Sequence[RunReport]) -> None:
     table.add_row(Text("ASR", style=asr_style), Text(asr_percent, style=asr_style))
     console.print(table)
     console.print()
+    modes = list(dict.fromkeys(item.auth_mode for item in reports))
+    if len(modes) > 1:
+        mode_table = Table(title="Режимы стенда", show_header=False, box=None, padding=(0, 2))
+        for mode in modes:
+            subset = [item for item in reports if item.auth_mode == mode]
+            mode_ok = sum(item.successful_count for item in subset)
+            mode_total = sum(item.total_count for item in subset)
+            mode_asr = f"{(mode_ok / mode_total * 100):.0f}%" if mode_total else "0%"
+            mode_table.add_row(mode, f"{mode_ok}/{mode_total}", mode_asr)
+        console.print(mode_table)
+        console.print()
     console.print(f"ASR: {asr_percent}")
     console.print(f"successful: {successful}/{total}")
 
@@ -126,6 +137,7 @@ def print_summary(console: Console, report: RunReport) -> None:
     asr_style = "bold green" if report.successful_count else "bold red"
     table = Table(title="Red Alert", show_header=False, box=None, padding=(0, 2))
     table.add_row("scenario", report.scenario)
+    table.add_row("auth_mode", report.auth_mode)
     table.add_row("target", report.target)
     table.add_row("successful", f"{report.successful_count}/{report.total_count}")
     table.add_row(Text("ASR", style=asr_style), Text(asr_percent, style=asr_style))

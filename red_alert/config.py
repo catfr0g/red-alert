@@ -6,6 +6,8 @@ from typing import Mapping
 DEFAULT_TARGET = "http://localhost:8600"
 DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MAX_TOKENS = 2048
+DEFAULT_AUTH_MODE = "vulnerable"
+ALLOWED_AUTH_MODES = ("vulnerable", "protected")
 CHAT_COMPLETIONS_SUFFIX = "/v1/chat/completions"
 CHAT_COMPLETIONS_TAIL = "/chat/completions"
 
@@ -27,6 +29,7 @@ class AppConfig:
     max_tokens: int
     debug: bool
     attacks_dir: Path
+    auth_modes: tuple[str, ...]
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -65,6 +68,15 @@ def env_flag(value: str | None) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def resolve_auth_modes(raw: str | None) -> tuple[str, ...]:
+    value = (raw or DEFAULT_AUTH_MODE).strip().lower()
+    if value == "both":
+        return ALLOWED_AUTH_MODES
+    if value in ALLOWED_AUTH_MODES:
+        return (value,)
+    raise UsageError("--auth-mode / RED_ALERT_AUTH_MODE: vulnerable, protected или both")
+
+
 def normalize_llm_base(url: str) -> str:
     resolved = url.strip().rstrip("/")
     if resolved.endswith(CHAT_COMPLETIONS_TAIL):
@@ -82,6 +94,7 @@ def resolve_config(
     environ: Mapping[str, str],
     debug: bool = False,
     attacks_dir: str | None = None,
+    auth_mode: str | None = None,
 ) -> AppConfig:
     resolved_key = api_key or environ.get("RED_ALERT_API_KEY")
     if not resolved_key:
@@ -138,4 +151,5 @@ def resolve_config(
         max_tokens=max_tokens,
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
+        auth_modes=resolve_auth_modes(auth_mode or environ.get("RED_ALERT_AUTH_MODE")),
     )

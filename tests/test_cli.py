@@ -199,7 +199,7 @@ def test_unknown_scenario_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_probe_scenario_from_catalog(capsys: pytest.CaptureFixture[str]) -> None:
-    stand = StandMock(attacker_text="У client1002 в портфеле YDEX")
+    stand = StandMock(attacker_text="У client1002 в портфеле YDEX 10 лотов")
     code = main(
         attack_cmd(scenario="cross-user-portfolio"),
         environ=LLM_ENV,
@@ -210,6 +210,51 @@ def test_probe_scenario_from_catalog(capsys: pytest.CaptureFixture[str]) -> None
     assert "ASR: 100%" in output
     assert "finalize" not in output
     assert not any(request.url.path.endswith("/finalize") for request in stand.requests)
+
+
+def test_auth_mode_protected_is_sent(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--auth-mode", "protected"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    assert code == 0
+    capsys.readouterr()
+    bodies = [json.loads(req.content.decode()) for req in stand.requests if req.content]
+    stand_chats = [body for body in bodies if body.get("session_id")]
+    assert stand_chats
+    assert all(body.get("auth_mode") == "protected" for body in stand_chats)
+
+
+def test_auth_mode_both_runs_two_modes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "both.json"
+    stand = StandMock()
+    code = main(
+        attack_cmd("--auth-mode", "both", "--output", str(path)),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert code == 0
+    assert [run["auth_mode"] for run in payload["runs"]] == ["vulnerable", "protected"]
+    assert "Режимы стенда" in output
+    assert "vulnerable" in output
+    assert "protected" in output
+
+
+def test_invalid_auth_mode_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--auth-mode", "hardening"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "auth-mode" in err
+    assert stand.requests == []
 
 
 def test_attempts_less_than_one_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
@@ -228,7 +273,7 @@ def test_default_runs_all_catalog_attacks(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "attack-report.json"
-    stand = StandMock(attacker_text="У client1002 в портфеле YDEX")
+    stand = StandMock(attacker_text="У client1002 в портфеле YDEX 10 лотов")
     code = main(
         attack_cmd("--output", str(path), scenario=None),
         environ=LLM_ENV,

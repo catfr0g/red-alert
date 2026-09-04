@@ -22,11 +22,12 @@ def run_attack(
     attempts: int,
     http_client: httpx.Client,
     planner: PayloadPlanner,
+    auth_mode: str = "vulnerable",
     on_step: OnStep | None = None,
     on_attempt_done: Callable[[AttemptResult], None] | None = None,
 ) -> RunReport:
-    attacker = StandClient(target, api_key, http_client)
-    victim = StandClient(target, victim_api_key, http_client)
+    attacker = StandClient(target, api_key, http_client, auth_mode=auth_mode)
+    victim = StandClient(target, victim_api_key, http_client, auth_mode=auth_mode)
     results: list[AttemptResult] = []
     prior_notes = ""
     for index in range(1, attempts + 1):
@@ -43,7 +44,12 @@ def run_attack(
         prior_notes = _attempt_notes(result)
         if on_attempt_done is not None:
             on_attempt_done(result)
-    return RunReport(scenario=scenario.name, target=target, attempts=results)
+    return RunReport(
+        scenario=scenario.name,
+        target=target,
+        auth_mode=auth_mode,
+        attempts=results,
+    )
 
 
 def _attempt_notes(result: AttemptResult) -> str:
