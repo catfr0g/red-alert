@@ -16,6 +16,7 @@ from red_alert.config import (
     resolve_config,
 )
 from red_alert.display import AttackProgress, print_debug_step, print_summaries
+from red_alert.judge import AttackJudge, OpenAICompatJudge
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.planner import LlmConfig, OpenAICompatPlanner
 from red_alert.report import format_json_reports, mask_secrets
@@ -81,6 +82,7 @@ def main(
     console: Console | None = None,
     progress_console: Console | None = None,
     trace_sink: TraceSink | None = None,
+    judge: AttackJudge | None = None,
 ) -> int:
     _configure_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -155,11 +157,19 @@ def main(
         planner = OpenAICompatPlanner(
             LlmConfig(
                 api_key=config.openai_api_key,
-                base_url=config.openai_base_url,
-                model=config.model,
+                base_url=config.attack_openai_base_url,
+                model=config.attack_model,
                 max_tokens=config.max_tokens,
             ),
             client,
+        )
+        resolved_judge = judge or OpenAICompatJudge(
+            LlmConfig(
+                api_key=config.openai_api_key,
+                base_url=config.judge_openai_base_url,
+                model=config.judge_model,
+                max_tokens=config.max_tokens,
+            )
         )
 
         def run_all() -> list[RunReport]:
@@ -183,6 +193,7 @@ def main(
                             attempts=config.attempts,
                             http_client=client,
                             planner=planner,
+                            judge=resolved_judge,
                             auth_mode=auth_mode,
                             on_step=on_step,
                             on_attempt_done=mark_done,

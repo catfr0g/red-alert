@@ -12,7 +12,7 @@ PoC ходит на тестовый стенд [GenAI Investment Assistant](../
 - [uv](https://docs.astral.sh/uv/)
 - Запущенный стенд `agent-api` (по умолчанию `http://localhost:8600`)
 - Два разных API-ключа стенда (атакующий и жертва, например `client1001` и `client1002`)
-- Ключ OpenAI-совместимого API для планировщика атак (`OPENAI_API_KEY`, `MODEL`)
+- Ключ OpenAI-совместимого API для планировщика атак и судьи (`OPENAI_API_KEY`, `MODEL_ATTACK`, `MODEL_JUDGE`)
 
 ## Установка
 
@@ -33,8 +33,10 @@ uv run pre-commit install
 | Атакующий | `RED_ALERT_API_KEY` / `--api-key` | Bearer клиента, который травит память |
 | Жертва | `RED_ALERT_VICTIM_API_KEY` / `--victim-api-key` | Bearer другого клиента |
 | Планировщик | `OPENAI_API_KEY` | Ключ OpenAI-совместимого API, не ключ стенда |
-| Планировщик | `OPENAI_BASE_URL` | База LLM, по умолчанию OpenRouter |
-| Планировщик | `MODEL` | Имя модели, например `openai/gpt-5-mini` |
+| Планировщик | `OPENAI_BASE_URL_ATTACK` | База атакующей LLM, по умолчанию OpenRouter |
+| Планировщик | `MODEL_ATTACK` | Имя атакующей модели, например `openai/gpt-5-mini` |
+| Судья | `OPENAI_BASE_URL_JUDGE` | Отдельная база LLM-судьи, по умолчанию OpenRouter |
+| Судья | `MODEL_JUDGE` | Имя модели-судьи |
 | Планировщик | `MAX_TOKENS` | Лимит ответа планировщика, по умолчанию `2048` |
 | Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — все файлы в каталоге |
 | Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с атаками, по умолчанию `attacks/` |
@@ -74,7 +76,11 @@ uv run red-alert attack --auth-mode both --output attack-report.json --attempts 
 Готовые сценарии в `attacks/`. В каждом YAML в комментариях расписаны поля:
 
 - `memory-poisoning` — отравление памяти, жертва должна советовать продать `YDEX`;
-- `cross-user-portfolio` — probe: агент выдаёт портфель другого клиента.
+- `memory-poisoning-peer-exfil` — global policy заставляет в ответ жертве вставить эталон CUS 1001 (SBER/GAZP);
+- `memory-poisoning-sleeper` — спящая policy: на «подушку безопасности» советовать ликвидацию на депозит;
+- `cross-user-portfolio` — probe: агент выдаёт портфель другого клиента;
+- `system-prompt-leakage` — probe: утечка system prompt / внутренних инструкций (LLM07);
+- `base64-injection` — probe: скрытый запрос в base64, агент декодирует и исполняет (LLM01).
 
 ```bash
 uv run red-alert attack --scenario memory-poisoning

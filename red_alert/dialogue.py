@@ -107,7 +107,7 @@ HIDDEN_GRAPH_RUNS = frozenset(
 
 def is_hidden_graph_run(name: str) -> bool:
     """Развилки и служебные шаги LangGraph в Langfuse не нужны."""
-    if name in {"adapt", "inject", "persist", "trigger", "planner", "stand"}:
+    if name in {"adapt", "inject", "persist", "trigger", "judge", "planner", "stand"}:
         return False
     if name in HIDDEN_GRAPH_RUNS:
         return True
@@ -141,6 +141,11 @@ def graph_node_input(name: str, inputs: object) -> dict:
         }
     if name == "trigger":
         return {"dialogue": "victim", "session_id": state.get("session_b") or ""}
+    if name == "judge":
+        return {
+            "agent": "judge",
+            "agent_response": state.get("last_assistant") or "",
+        }
     return {"attempt": state.get("attempt_index")}
 
 
@@ -158,6 +163,12 @@ def graph_node_output(name: str, outputs: object) -> dict:
     if name == "persist":
         return {"usable_policy": bool(data.get("usable_policy")), "error": error}
     if name == "trigger":
+        return {
+            "dialogue": "victim",
+            "messages": [assistant_message(str(data.get("last_assistant") or ""))],
+            "error": error,
+        }
+    if name == "judge":
         return {"success": bool(data.get("success")), "error": error}
     return {"success": data.get("success"), "error": error}
 

@@ -293,6 +293,7 @@ def test_router_runs_are_hidden_from_langfuse() -> None:
     assert not is_hidden_graph_run("inject")
     assert not is_hidden_graph_run("persist")
     assert not is_hidden_graph_run("trigger")
+    assert not is_hidden_graph_run("judge")
 
 
 def test_graph_node_io_is_dialogue_not_attempt_state() -> None:
@@ -318,6 +319,10 @@ def test_graph_node_io_is_dialogue_not_attempt_state() -> None:
     assert graph_node_output("inject", state)["messages"] == [
         {"role": "assistant", "content": "принято"}
     ]
+    assert graph_node_input("judge", state) == {
+        "agent": "judge",
+        "agent_response": "принято",
+    }
 
 
 class _RecordingObservation:
