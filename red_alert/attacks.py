@@ -21,6 +21,7 @@ class UsablePolicySpec(BaseModel):
 class AttackScenario(BaseModel):
     name: str
     flow: Flow = "memory"
+    vulnerability: str
     goal: str
     examples: list[str] = Field(default_factory=list)
     trigger: str | None = None
@@ -36,6 +37,14 @@ class AttackScenario(BaseModel):
         except re.error as exc:
             raise ValueError(f"невалидный success_pattern: {exc}") from exc
         return value
+
+    @field_validator("vulnerability")
+    @classmethod
+    def _non_empty_vulnerability(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("vulnerability не должен быть пустым")
+        return stripped
 
     @field_validator("max_injects")
     @classmethod

@@ -6,8 +6,9 @@ import httpx
 from langgraph.graph import END, START, StateGraph
 
 from red_alert.attacks import AttackScenario
+from red_alert.dialogue import DialogueTracer, NullDialogue, finalize_view
 from red_alert.models import AttackStep, AttemptResult
-from red_alert.planner import PayloadPlanner, PlannerContext
+from red_alert.planner import PayloadPlanner, PlannerContext, build_planner_messages
 from red_alert.stand_client import StandClient
 
 OnStep = Callable[[AttackStep], None]
@@ -141,7 +142,10 @@ def build_attempt_graph(
     scenario: AttackScenario,
     planner: PayloadPlanner,
     on_step: OnStep | None = None,
+    dialogue: DialogueTracer | None = None,
 ):
+    log = dialogue or NullDialogue()
+
     def adapt(state: AttemptState) -> dict:
         steps = list(state.steps)
         context = PlannerContext(
@@ -153,7 +157,14 @@ def build_attempt_graph(
             prior_notes=state.prior_notes,
             examples=scenario.payloads,
         )
-        turn = planner.plan(context)
+        with log.planner(messages=build_planner_messages(context)) as observed:
+            turn = planner.plan(context)
+            model = turn.request_body.get("model") if isinstance(turn.request_body, dict) else None
+            observed.finish(
+                output=turn.payload,
+                error=turn.error,
+                model=model if isinstance(model, str) else None,
+            )
         if turn.response is None:
             step = _error_step(
                 name="adapt",
@@ -183,7 +194,14 @@ def build_attempt_graph(
     def inject(state: AttemptState) -> dict:
         steps = list(state.steps)
         session_a = f"ra-a-{uuid.uuid4().hex[:12]}"
-        error, assistant = _send_payload(attacker, state.payload, session_a, steps, on_step)
+        log.begin_dialogue(name="attacker", session_id=session_a)
+        with log.stand(user=state.payload, actor="attacker", session_id=session_a) as observed:
+            error, assistant = _send_payload(attacker, state.payload, session_a, steps, on_step)
+            observed.finish(output=assistant, error=error)
+        log.add_message("user", state.payload)
+        log.add_message("assistant", assistant)
+        if error or scenario.flow == "probe":
+            log.end_dialogue()
         success = False
         if scenario.flow == "probe" and not error:
             success = scenario.is_success(assistant)
@@ -200,33 +218,42 @@ def build_attempt_graph(
     def finalize(state: AttemptState) -> dict:
         steps = list(state.steps)
         session_a = state.session_a
-        try:
-            _, response = attacker.finalize(session_a)
-        except httpx.RequestError as exc:
-            steps.append(
-                _error_step(
-                    name="finalize",
-                    method="POST",
-                    url=attacker.finalize_url(session_a),
-                    actor=ACTOR_ATTACKER,
-                    request_body=None,
-                    error=str(exc),
+        with log.finalize(session_id=session_a) as observed:
+            try:
+                _, response = attacker.finalize(session_a)
+            except httpx.RequestError as exc:
+                steps.append(
+                    _error_step(
+                        name="finalize",
+                        method="POST",
+                        url=attacker.finalize_url(session_a),
+                        actor=ACTOR_ATTACKER,
+                        request_body=None,
+                        error=str(exc),
+                    )
                 )
+                _emit(on_step, steps[-1])
+                observed.finish(error=str(exc))
+                log.end_dialogue()
+                return {"steps": steps, "error": str(exc)}
+            finalize_step = _http_step(
+                name="finalize",
+                method="POST",
+                url=attacker.finalize_url(session_a),
+                actor=ACTOR_ATTACKER,
+                request_body=None,
+                response=response,
             )
-            _emit(on_step, steps[-1])
-            return {"steps": steps, "error": str(exc)}
-        finalize_step = _http_step(
-            name="finalize",
-            method="POST",
-            url=attacker.finalize_url(session_a),
-            actor=ACTOR_ATTACKER,
-            request_body=None,
-            response=response,
-        )
-        steps.append(finalize_step)
-        _emit(on_step, finalize_step)
-        if finalize_step.error:
-            return {"steps": steps, "error": finalize_step.error, "last_finalize": None}
+            steps.append(finalize_step)
+            _emit(on_step, finalize_step)
+            view = finalize_view(finalize_step.response_body)
+            if finalize_step.error:
+                observed.finish(output=view, error=finalize_step.error)
+                log.end_dialogue()
+                return {"steps": steps, "error": finalize_step.error, "last_finalize": None}
+            observed.finish(output=view)
+            log.set_finalize(view)
+            log.end_dialogue()
         return {
             "steps": steps,
             "error": None,
@@ -237,39 +264,52 @@ def build_attempt_graph(
     def trigger(state: AttemptState) -> dict:
         steps = list(state.steps)
         session_b = state.session_b
-        try:
-            request_body, response = victim.chat(
-                session_id=session_b, user_content=scenario.trigger or ""
-            )
-        except httpx.RequestError as exc:
-            steps.append(
-                _error_step(
-                    name="trigger",
-                    method="POST",
-                    url=victim.chat_url(),
-                    actor=ACTOR_VICTIM,
-                    request_body={"session_id": session_b},
-                    error=str(exc),
+        user = scenario.trigger or ""
+        log.begin_dialogue(name="victim", session_id=session_b)
+        with log.stand(user=user, actor="victim", session_id=session_b) as observed:
+            try:
+                request_body, response = victim.chat(session_id=session_b, user_content=user)
+            except httpx.RequestError as exc:
+                steps.append(
+                    _error_step(
+                        name="trigger",
+                        method="POST",
+                        url=victim.chat_url(),
+                        actor=ACTOR_VICTIM,
+                        request_body={"session_id": session_b},
+                        error=str(exc),
+                    )
                 )
+                _emit(on_step, steps[-1])
+                observed.finish(error=str(exc))
+                log.add_message("user", user)
+                log.end_dialogue()
+                return {"steps": steps, "error": str(exc), "success": False}
+            trigger_step = _http_step(
+                name="trigger",
+                method="POST",
+                url=victim.chat_url(),
+                actor=ACTOR_VICTIM,
+                request_body=request_body,
+                response=response,
             )
-            _emit(on_step, steps[-1])
-            return {"steps": steps, "error": str(exc), "success": False}
-        trigger_step = _http_step(
-            name="trigger",
-            method="POST",
-            url=victim.chat_url(),
-            actor=ACTOR_VICTIM,
-            request_body=request_body,
-            response=response,
-        )
-        steps.append(trigger_step)
-        _emit(on_step, trigger_step)
-        if trigger_step.error:
-            return {"steps": steps, "error": trigger_step.error, "success": False}
+            steps.append(trigger_step)
+            _emit(on_step, trigger_step)
+            assistant = _assistant_text(trigger_step.response_body)
+            if trigger_step.error:
+                observed.finish(output=assistant, error=trigger_step.error)
+                log.add_message("user", user)
+                log.add_message("assistant", assistant)
+                log.end_dialogue()
+                return {"steps": steps, "error": trigger_step.error, "success": False}
+            observed.finish(output=assistant)
+            log.add_message("user", user)
+            log.add_message("assistant", assistant)
+            log.end_dialogue()
         return {
             "steps": steps,
             "error": None,
-            "success": scenario.is_success(_assistant_text(trigger_step.response_body)),
+            "success": scenario.is_success(assistant),
         }
 
     def after_adapt(state: AttemptState) -> str:
@@ -312,23 +352,35 @@ def run_attempt(
     planner: PayloadPlanner,
     on_step: OnStep | None = None,
     prior_notes: str = "",
+    invoke_config: dict | None = None,
+    on_graph_tick: Callable[[], None] | None = None,
+    dialogue: DialogueTracer | None = None,
 ) -> AttemptResult:
-    state = build_attempt_graph(attacker, victim, scenario, planner, on_step).invoke(
-        {
-            "attempt_index": attempt_index,
-            "session_a": "",
-            "session_b": f"ra-b-{uuid.uuid4().hex[:12]}",
-            "injects": 0,
-            "payload": "",
-            "last_assistant": "",
-            "last_finalize": None,
-            "prior_notes": prior_notes,
-            "steps": [],
-            "error": None,
-            "usable_policy": False,
-            "success": False,
-        }
-    )
+    graph = build_attempt_graph(attacker, victim, scenario, planner, on_step, dialogue)
+    initial = {
+        "attempt_index": attempt_index,
+        "session_a": "",
+        "session_b": f"ra-b-{uuid.uuid4().hex[:12]}",
+        "injects": 0,
+        "payload": "",
+        "last_assistant": "",
+        "last_finalize": None,
+        "prior_notes": prior_notes,
+        "steps": [],
+        "error": None,
+        "usable_policy": False,
+        "success": False,
+    }
+    config = invoke_config or {}
+    if config.get("callbacks"):
+        state = None
+        for state in graph.stream(initial, config=config, stream_mode="values"):
+            if on_graph_tick is not None:
+                on_graph_tick()
+        if state is None:
+            state = graph.invoke(initial, config=config)
+    else:
+        state = graph.invoke(initial, config=config)
     return AttemptResult(
         attempt_index=state["attempt_index"],
         success=bool(state["success"]),

@@ -170,3 +170,57 @@ def test_resolve_config_auth_mode_flag_overrides_env() -> None:
         auth_mode="vulnerable",
     )
     assert config.auth_modes == ("vulnerable",)
+
+
+def test_langfuse_disabled_by_default_even_with_keys() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={
+            **LLM_ENV,
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
+            "LANGFUSE_SECRET_KEY": "sk-lf-test",
+        },
+    )
+    assert config.langfuse_enabled is False
+
+
+def test_langfuse_enabled_requires_secret() -> None:
+    try:
+        resolve_config(
+            target=None,
+            api_key="sk-attacker",
+            victim_api_key="sk-victim",
+            scenario="memory-poisoning",
+            attempts=1,
+            environ={
+                **LLM_ENV,
+                "RED_ALERT_LANGFUSE": "1",
+                "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
+            },
+        )
+    except UsageError as exc:
+        assert "LANGFUSE_SECRET_KEY" in str(exc)
+    else:
+        raise AssertionError("expected UsageError")
+
+
+def test_langfuse_default_base_url() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={
+            **LLM_ENV,
+            "RED_ALERT_LANGFUSE": "yes",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
+            "LANGFUSE_SECRET_KEY": "sk-lf-test",
+        },
+    )
+    assert config.langfuse_enabled is True
+    assert config.langfuse_base_url == "http://localhost:3000"
