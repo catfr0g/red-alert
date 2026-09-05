@@ -15,3 +15,11 @@ def test_pre_commit_config_runs_pytest() -> None:
     text = CONFIG.read_text(encoding="utf-8")
     assert "id: pytest" in text
     assert "uv run pytest" in text
+
+
+def test_pre_commit_config_exports_requirements() -> None:
+    text = CONFIG.read_text(encoding="utf-8")
+    assert "id: export-requirements" in text
+    assert "uv export --frozen --no-dev --no-hashes -o requirements.txt" in text
+    assert "uv.lock" in text or "uv\\.lock" in text
+    assert "pyproject.toml" in text or "pyproject\\.toml" in text
