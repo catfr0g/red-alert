@@ -138,6 +138,7 @@ def print_summary(console: Console, report: RunReport) -> None:
     table = Table(title="Red Alert", show_header=False, box=None, padding=(0, 2))
     table.add_row("scenario", report.scenario)
     table.add_row("auth_mode", report.auth_mode)
+    table.add_row("isolation", report.isolation)
     table.add_row("target", report.target)
     table.add_row("successful", f"{report.successful_count}/{report.total_count}")
     table.add_row(Text("ASR", style=asr_style), Text(asr_percent, style=asr_style))

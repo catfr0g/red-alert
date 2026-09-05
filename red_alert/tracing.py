@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 import httpx
 from langfuse import Langfuse, propagate_attributes
 from langfuse.langchain import CallbackHandler
+from langfuse.types import TraceContext
+from opentelemetry import context as otel_context
 
 from red_alert.config import AppConfig
 from red_alert.dialogue import (
@@ -31,6 +33,7 @@ PLANNER_ACTOR = "planner"
 CHAT_PATH = "/v1/chat/completions"
 FINALIZE_PATH = "/v1/sessions/finalize"
 FINALIZE_RE = re.compile(r"^/v1/sessions/[^/]+/finalize/?$")
+RESET_PATH = "/v1/memory/reset"
 
 
 class LangfuseError(Exception):
@@ -40,7 +43,12 @@ class LangfuseError(Exception):
 class GraphCallbackHandler(CallbackHandler):
     """CallbackHandler, который в UI кладёт короткий ход диалога, а не AttemptState."""
 
-    def __init__(self, *, public_key: str | None = None, trace_context=None) -> None:
+    def __init__(
+        self,
+        *,
+        public_key: str | None = None,
+        trace_context: TraceContext | None = None,
+    ) -> None:
         super().__init__(public_key=public_key, trace_context=trace_context)
         self._node_names: dict = {}
         self._hidden_runs: set = set()
@@ -86,9 +94,10 @@ class GraphCallbackHandler(CallbackHandler):
 
 
 class LangfuseDialogue(DialogueLog):
-    def __init__(self, sdk: Langfuse) -> None:
+    def __init__(self, sdk: Langfuse, *, isolate_context: TraceContext | None = None) -> None:
         super().__init__()
         self._sdk = sdk
+        self._isolate_context = isolate_context
 
     @contextmanager
     def planner(self, *, messages: list[dict], model: str | None = None) -> Iterator[DialogueTurn]:
@@ -112,12 +121,23 @@ class LangfuseDialogue(DialogueLog):
             yield turn
 
     @contextmanager
-    def finalize(self, *, session_id: str) -> Iterator[DialogueTurn]:
+    def persist(self, *, session_id: str) -> Iterator[DialogueTurn]:
         with self._observation(
-            name="finalize",
+            name="persist",
             as_type="span",
-            input={"session_id": session_id, "action": "finalize"},
+            input={"session_id": session_id, "action": "persist"},
             metadata={"dialogue": "attacker", "session_id": session_id},
+        ) as turn:
+            yield turn
+
+    @contextmanager
+    def isolate(self) -> Iterator[DialogueTurn]:
+        with self._observation(
+            name="isolate",
+            as_type="span",
+            input={"action": "isolate"},
+            metadata={"capability": "isolate"},
+            trace_context=self._isolate_context,
         ) as turn:
             yield turn
 
@@ -130,6 +150,7 @@ class LangfuseDialogue(DialogueLog):
         input: object,
         metadata: dict,
         model: str | None = None,
+        trace_context: TraceContext | None = None,
     ) -> Iterator[DialogueTurn]:
         kwargs: dict = {
             "name": name,
@@ -139,6 +160,8 @@ class LangfuseDialogue(DialogueLog):
         }
         if as_type == "generation" and model:
             kwargs["model"] = model
+        if trace_context is not None:
+            kwargs["trace_context"] = trace_context
         try:
             cm = self._sdk.start_as_current_observation(**kwargs)
         except Exception as exc:
@@ -179,6 +202,7 @@ class TraceSink(Protocol):
         auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
+        isolation: str = "on",
     ) -> AbstractContextManager[GraphTrace]: ...
 
     def close(self) -> None: ...
@@ -210,6 +234,7 @@ class NullSink:
         auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
+        isolation: str = "on",
     ) -> Iterator[_NoopTrace]:
         yield _NoopTrace()
 
@@ -229,19 +254,23 @@ class _LangfuseTrace:
         auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
+        isolation: str,
+        trace_id: str,
+        isolate_context: TraceContext | None = None,
     ) -> None:
         self.invoke_config: dict[str, object] = {
             "callbacks": [handler],
             "run_name": f"{scenario}:{attempt_index}",
             "metadata": {"langfuse_tags": [f"vulnerability:{vulnerability}"]},
         }
-        self.dialogue: DialogueTracer = LangfuseDialogue(sink._sdk)
+        self.dialogue: DialogueTracer = LangfuseDialogue(sink._sdk, isolate_context=isolate_context)
         self._sink = sink
-        self._handler = handler
+        self._trace_id = trace_id
         self._scenario = scenario
         self._flow = flow
         self._vulnerability = vulnerability
         self._auth_mode = auth_mode
+        self._isolation = isolation
         self._secrets = secrets
 
     def on_tick(self) -> None:
@@ -249,7 +278,7 @@ class _LangfuseTrace:
 
     def complete(self, attempt: AttemptResult) -> None:
         self.dialogue.end_dialogue()
-        trace_id = self._handler.last_trace_id
+        trace_id = self._trace_id
         if not trace_id:
             raise LangfuseError("Не удалось записать trace в Langfuse: нет trace_id")
         self._sink.finalize_trace(
@@ -258,12 +287,14 @@ class _LangfuseTrace:
                 vulnerability=self._vulnerability,
                 success=attempt.success,
                 steps=attempt.steps,
+                isolation=self._isolation,
             ),
             success=attempt.success,
             metadata={
                 "scenario": self._scenario,
                 "flow": self._flow,
                 "auth_mode": self._auth_mode,
+                "isolation": self._isolation,
                 "attempt_index": attempt.attempt_index,
                 "session_a": attempt.session_a,
                 "session_b": attempt.session_b,
@@ -325,34 +356,53 @@ class LangfuseSink:
         auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
+        isolation: str = "on",
     ) -> Iterator[_LangfuseTrace]:
         merged = tuple(dict.fromkeys([*self._secrets, *[item for item in secrets if item]]))
+        attempt_name = f"{scenario}:{attempt_index}"
+        metadata = {
+            "scenario": scenario,
+            "flow": flow,
+            "auth_mode": auth_mode,
+            "isolation": isolation,
+            "attempt_index": attempt_index,
+        }
         try:
-            handler = GraphCallbackHandler(public_key=self._public_key)
-        except Exception as exc:
-            raise LangfuseError(f"Langfuse недоступен: {exc}") from exc
-        session = _LangfuseTrace(
-            self,
-            handler,
-            scenario=scenario,
-            flow=flow,
-            vulnerability=vulnerability,
-            auth_mode=auth_mode,
-            attempt_index=attempt_index,
-            secrets=merged,
-        )
-        try:
-            with propagate_attributes(
-                trace_name=f"{scenario}:{attempt_index}",
-                tags=[f"vulnerability:{vulnerability}"],
-                metadata={
-                    "scenario": scenario,
-                    "flow": flow,
-                    "auth_mode": auth_mode,
-                    "attempt_index": attempt_index,
-                },
+            with (
+                _fresh_otel_context(),
+                propagate_attributes(
+                    trace_name=attempt_name,
+                    tags=[f"vulnerability:{vulnerability}", f"isolation:{isolation}"],
+                    metadata=metadata,
+                ),
+                self._attempt_root(
+                    name=attempt_name,
+                    scenario=scenario,
+                    attempt_index=attempt_index,
+                    metadata=metadata,
+                ) as root,
             ):
-                yield session
+                trace_context = _trace_context_of(root)
+                try:
+                    handler = GraphCallbackHandler(
+                        public_key=self._public_key,
+                        trace_context=trace_context,
+                    )
+                except Exception as exc:
+                    raise LangfuseError(f"Langfuse недоступен: {exc}") from exc
+                yield _LangfuseTrace(
+                    self,
+                    handler,
+                    scenario=scenario,
+                    flow=flow,
+                    vulnerability=vulnerability,
+                    auth_mode=auth_mode,
+                    attempt_index=attempt_index,
+                    secrets=merged,
+                    isolation=isolation,
+                    trace_id=trace_context["trace_id"],
+                    isolate_context=trace_context,
+                )
         finally:
             self.flush()
 
@@ -417,6 +467,36 @@ class LangfuseSink:
         except Exception as exc:
             raise LangfuseError(f"Не удалось записать trace в Langfuse: {exc}") from exc
 
+    @contextmanager
+    def _attempt_root(
+        self,
+        *,
+        name: str,
+        scenario: str,
+        attempt_index: int,
+        metadata: dict,
+    ) -> Iterator[object]:
+        try:
+            cm = self._sdk.start_as_current_observation(
+                name=name,
+                as_type="span",
+                input={
+                    "action": "attempt",
+                    "scenario": scenario,
+                    "attempt_index": attempt_index,
+                },
+                metadata=metadata,
+            )
+        except Exception as exc:
+            raise LangfuseError(f"Не удалось записать trace в Langfuse: {exc}") from exc
+        try:
+            with cm as root:
+                yield root
+        except LangfuseError:
+            raise
+        except Exception as exc:
+            raise LangfuseError(f"Не удалось записать trace в Langfuse: {exc}") from exc
+
     def _request(
         self,
         method: str,
@@ -461,6 +541,8 @@ def stand_endpoint(url: str, actor: str | None) -> str | None:
         return CHAT_PATH
     if FINALIZE_RE.match(path) or path.endswith("/finalize"):
         return FINALIZE_PATH
+    if path.rstrip("/").endswith(RESET_PATH) or path.endswith("/memory/reset"):
+        return RESET_PATH
     return None
 
 
@@ -469,11 +551,14 @@ def attempt_tags(
     vulnerability: str,
     success: bool,
     steps: Sequence[AttackStep],
+    isolation: str | None = None,
 ) -> list[str]:
     tags = [
         f"outcome:{'success' if success else 'failure'}",
         f"vulnerability:{vulnerability}",
     ]
+    if isolation:
+        tags.append(f"isolation:{isolation}")
     seen: set[str] = set()
     for step in steps:
         endpoint = stand_endpoint(step.url, step.actor)
@@ -482,6 +567,29 @@ def attempt_tags(
         seen.add(endpoint)
         tags.append(f"endpoint:{endpoint}")
     return tags
+
+
+@contextmanager
+def _fresh_otel_context() -> Iterator[None]:
+    token = otel_context.attach(otel_context.Context())
+    try:
+        yield
+    finally:
+        try:
+            otel_context.detach(token)
+        except Exception:
+            pass
+
+
+def _trace_context_of(root: object) -> TraceContext:
+    trace_id = getattr(root, "trace_id", None)
+    if not trace_id:
+        raise LangfuseError("Не удалось записать trace в Langfuse: нет trace_id")
+    context: TraceContext = {"trace_id": str(trace_id)}
+    span_id = getattr(root, "id", None)
+    if span_id:
+        context["parent_span_id"] = str(span_id)
+    return context
 
 
 def _event(event_type: str, timestamp: str, body: dict) -> dict:

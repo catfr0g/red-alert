@@ -9,12 +9,18 @@ import httpx
 from rich.console import Console
 
 from red_alert.attacks import AttackScenario, load_catalog_attacks, load_named_attack
-from red_alert.config import UsageError, merged_environ, resolve_config
+from red_alert.config import (
+    ISOLATION_OFF_WARNING,
+    UsageError,
+    merged_environ,
+    resolve_config,
+)
 from red_alert.display import AttackProgress, print_debug_step, print_summaries
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.planner import LlmConfig, OpenAICompatPlanner
 from red_alert.report import format_json_reports, mask_secrets
 from red_alert.runner import run_attack
+from red_alert.target import IsolateError
 from red_alert.tracing import LangfuseError, TraceSink, build_sink
 
 HTTP_TIMEOUT_SECONDS = 180.0
@@ -44,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Режим стенда: vulnerable, protected или both",
     )
     attack.add_argument("--attempts", type=int, default=1, help="Число попыток каждого сценария")
+    attack.add_argument(
+        "--isolate",
+        help="Изоляция попыток: on или off. По умолчанию on",
+    )
     attack.add_argument(
         "--output",
         "-o",
@@ -93,6 +103,7 @@ def main(
             debug=args.debug,
             attacks_dir=args.attacks_dir,
             auth_mode=args.auth_mode,
+            isolation=args.isolate,
         )
         scenarios = _load_scenarios(config.scenario, config.attacks_dir)
     except UsageError as exc:
@@ -138,6 +149,8 @@ def main(
         sink = build_sink(config, client, secrets)
     progress: AttackProgress | None = None
     try:
+        if config.isolation == "off":
+            print(ISOLATION_OFF_WARNING, file=sys.stderr)
         sink.ping()
         planner = OpenAICompatPlanner(
             LlmConfig(
@@ -175,6 +188,7 @@ def main(
                             on_attempt_done=mark_done,
                             sink=sink,
                             secrets=secrets,
+                            isolation=config.isolation,
                         )
                     )
             return reports
@@ -191,7 +205,7 @@ def main(
             ) as progress:
                 reports = run_all()
         sink.close()
-    except LangfuseError as exc:
+    except (LangfuseError, IsolateError) as exc:
         print(mask_secrets(str(exc), secrets), file=sys.stderr)
         return 1
     finally:

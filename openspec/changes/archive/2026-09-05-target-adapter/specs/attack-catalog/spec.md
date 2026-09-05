@@ -1,8 +1,4 @@
-## Purpose
-
-Атаки описываются YAML-файлами в каталоге. CLI выбирает файл по имени или пути либо прогоняет весь каталог.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Атака описывается YAML-файлом
 

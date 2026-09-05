@@ -10,6 +10,7 @@ from red_alert.config import (
     read_env_file,
     resolve_auth_modes,
     resolve_config,
+    resolve_isolation,
 )
 
 LLM_ENV = {
@@ -60,6 +61,7 @@ def test_resolve_config_accepts_full_chat_url() -> None:
     assert config.debug is False
     assert config.attacks_dir.name == "attacks"
     assert config.auth_modes == ("vulnerable",)
+    assert config.isolation == "on"
 
 
 def test_resolve_config_reads_llm_overrides() -> None:
@@ -206,6 +208,42 @@ def test_langfuse_enabled_requires_secret() -> None:
         assert "LANGFUSE_SECRET_KEY" in str(exc)
     else:
         raise AssertionError("expected UsageError")
+
+
+def test_resolve_isolation() -> None:
+    assert resolve_isolation(None) == "on"
+    assert resolve_isolation("OFF") == "off"
+    try:
+        resolve_isolation("maybe")
+    except UsageError as exc:
+        assert "isolate" in str(exc)
+    else:
+        raise AssertionError("expected UsageError")
+
+
+def test_resolve_config_isolation_from_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_ISOLATE": "off"},
+    )
+    assert config.isolation == "off"
+
+
+def test_resolve_config_isolation_flag_overrides_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_ISOLATE": "off"},
+        isolation="on",
+    )
+    assert config.isolation == "on"
 
 
 def test_langfuse_default_base_url() -> None:

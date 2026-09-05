@@ -7,8 +7,13 @@ DEFAULT_TARGET = "http://localhost:8600"
 DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_AUTH_MODE = "vulnerable"
+DEFAULT_ISOLATION = "on"
 DEFAULT_LANGFUSE_BASE_URL = "http://localhost:3000"
 ALLOWED_AUTH_MODES = ("vulnerable", "protected")
+ALLOWED_ISOLATION = ("on", "off")
+ISOLATION_OFF_WARNING = (
+    "Изоляция выключена: попытки могут наследовать память предыдущих прогонов, ASR не независим."
+)
 CHAT_COMPLETIONS_SUFFIX = "/v1/chat/completions"
 CHAT_COMPLETIONS_TAIL = "/chat/completions"
 
@@ -31,6 +36,7 @@ class AppConfig:
     debug: bool
     attacks_dir: Path
     auth_modes: tuple[str, ...]
+    isolation: str = DEFAULT_ISOLATION
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -73,6 +79,13 @@ def env_flag(value: str | None) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def resolve_isolation(raw: str | None) -> str:
+    value = (raw or DEFAULT_ISOLATION).strip().lower()
+    if value in ALLOWED_ISOLATION:
+        return value
+    raise UsageError("--isolate / RED_ALERT_ISOLATE: on или off")
+
+
 def resolve_auth_modes(raw: str | None) -> tuple[str, ...]:
     value = (raw or DEFAULT_AUTH_MODE).strip().lower()
     if value == "both":
@@ -100,6 +113,7 @@ def resolve_config(
     debug: bool = False,
     attacks_dir: str | None = None,
     auth_mode: str | None = None,
+    isolation: str | None = None,
 ) -> AppConfig:
     resolved_key = api_key or environ.get("RED_ALERT_API_KEY")
     if not resolved_key:
@@ -168,6 +182,9 @@ def resolve_config(
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
         auth_modes=resolve_auth_modes(auth_mode or environ.get("RED_ALERT_AUTH_MODE")),
+        isolation=resolve_isolation(
+            isolation if isolation is not None else environ.get("RED_ALERT_ISOLATE")
+        ),
         langfuse_enabled=langfuse_enabled,
         langfuse_public_key=langfuse_public_key,
         langfuse_secret_key=langfuse_secret_key,

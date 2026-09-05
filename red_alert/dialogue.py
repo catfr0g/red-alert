@@ -33,7 +33,7 @@ class DialogueTracer(Protocol):
 
     def add_message(self, role: str, content: str) -> None: ...
 
-    def set_finalize(self, body: object) -> None: ...
+    def set_persist(self, body: object) -> None: ...
 
     def planner(
         self, *, messages: list[dict], model: str | None = None
@@ -43,7 +43,9 @@ class DialogueTracer(Protocol):
         self, *, user: str, actor: str, session_id: str
     ) -> AbstractContextManager[DialogueTurn]: ...
 
-    def finalize(self, *, session_id: str) -> AbstractContextManager[DialogueTurn]: ...
+    def persist(self, *, session_id: str) -> AbstractContextManager[DialogueTurn]: ...
+
+    def isolate(self) -> AbstractContextManager[DialogueTurn]: ...
 
 
 class DialogueLog:
@@ -60,9 +62,9 @@ class DialogueLog:
             return
         self._current["messages"].append({"role": role, "content": content})
 
-    def set_finalize(self, body: object) -> None:
+    def set_persist(self, body: object) -> None:
         if self._current is not None:
-            self._current["finalize"] = body
+            self._current["persist"] = body
 
     def end_dialogue(self) -> None:
         if self._current is None:
@@ -81,7 +83,11 @@ class NullDialogue(DialogueLog):
         yield DialogueTurn()
 
     @contextmanager
-    def finalize(self, *, session_id: str) -> Iterator[DialogueTurn]:
+    def persist(self, *, session_id: str) -> Iterator[DialogueTurn]:
+        yield DialogueTurn()
+
+    @contextmanager
+    def isolate(self) -> Iterator[DialogueTurn]:
         yield DialogueTurn()
 
 
@@ -89,7 +95,7 @@ HIDDEN_GRAPH_RUNS = frozenset(
     {
         "after_adapt",
         "after_inject",
-        "after_finalize",
+        "after_persist",
         "ChannelWrite",
         "Branch",
         "_route",
@@ -101,7 +107,7 @@ HIDDEN_GRAPH_RUNS = frozenset(
 
 def is_hidden_graph_run(name: str) -> bool:
     """Развилки и служебные шаги LangGraph в Langfuse не нужны."""
-    if name in {"adapt", "inject", "finalize", "trigger", "planner", "stand"}:
+    if name in {"adapt", "inject", "persist", "trigger", "planner", "stand"}:
         return False
     if name in HIDDEN_GRAPH_RUNS:
         return True
@@ -127,11 +133,11 @@ def graph_node_input(name: str, inputs: object) -> dict:
             "dialogue": "attacker",
             "messages": [user_message(str(state.get("payload") or ""))],
         }
-    if name == "finalize":
+    if name == "persist":
         return {
             "dialogue": "attacker",
             "session_id": state.get("session_a") or "",
-            "action": "finalize",
+            "action": "persist",
         }
     if name == "trigger":
         return {"dialogue": "victim", "session_id": state.get("session_b") or ""}
@@ -149,7 +155,7 @@ def graph_node_output(name: str, outputs: object) -> dict:
             "messages": [assistant_message(str(data.get("last_assistant") or ""))],
             "error": error,
         }
-    if name == "finalize":
+    if name == "persist":
         return {"usable_policy": bool(data.get("usable_policy")), "error": error}
     if name == "trigger":
         return {"success": bool(data.get("success")), "error": error}
@@ -164,7 +170,7 @@ def assistant_message(content: str) -> dict[str, str]:
     return {"role": "assistant", "content": content}
 
 
-def finalize_view(body: object) -> object:
+def persist_view(body: object) -> object:
     if isinstance(body, dict) and "facts" in body:
         return {"facts": body.get("facts")}
     return body

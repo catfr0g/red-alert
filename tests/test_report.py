@@ -17,6 +17,7 @@ def test_asr_all_success() -> None:
     assert "successful: 2/2" in text
     assert "ASR: 100%" in text
     assert "auth_mode: vulnerable" in text
+    assert "isolation: on" in text
 
 
 def test_asr_partial() -> None:
@@ -75,7 +76,7 @@ def test_json_report_includes_only_successful_traces() -> None:
                         actor="attacker",
                     ),
                     AttackStep(
-                        name="finalize",
+                        name="persist",
                         method="POST",
                         url="http://localhost:8600/v1/sessions/a1/finalize",
                         actor="attacker",
@@ -95,7 +96,7 @@ def test_json_report_includes_only_successful_traces() -> None:
     assert '"attempt_index": 1' in payload
     assert '"attempt_index": 2' not in payload
     assert "payload-1" in payload
-    assert "finalize" in payload
+    assert "persist" in payload
     assert "trigger" in payload
     assert "sk-secret" not in payload
 
@@ -160,4 +161,5 @@ def test_json_reports_single_keeps_flat_shape() -> None:
     payload = json.loads(format_json_reports([report], secrets=["sk-secret"]))
     assert payload["scenario"] == "memory-poisoning"
     assert payload["auth_mode"] == "vulnerable"
+    assert payload["isolation"] == "on"
     assert "runs" not in payload

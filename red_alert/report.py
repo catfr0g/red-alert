@@ -16,6 +16,7 @@ def format_summary(report: RunReport) -> str:
         f"scenario: {report.scenario}",
         f"target: {report.target}",
         f"auth_mode: {report.auth_mode}",
+        f"isolation: {report.isolation}",
         f"successful: {report.successful_count}/{report.total_count}",
         f"ASR: {asr_percent}",
     ]
@@ -38,6 +39,7 @@ def report_payload(report: RunReport, *, include_failed: bool = False) -> dict:
         "scenario": report.scenario,
         "target": report.target,
         "auth_mode": report.auth_mode,
+        "isolation": report.isolation,
         "successful": report.successful_count,
         "total": report.total_count,
         "asr": report.asr,

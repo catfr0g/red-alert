@@ -24,6 +24,7 @@ class RunReport(BaseModel):
     scenario: str
     target: str
     auth_mode: str = "vulnerable"
+    isolation: str = "on"
     attempts: list[AttemptResult] = Field(default_factory=list)
 
     @property

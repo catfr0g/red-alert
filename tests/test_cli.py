@@ -91,6 +91,8 @@ class StandMock:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
+        if path.rstrip("/").endswith("/memory/reset"):
+            return httpx.Response(200, json={"status": "reset", "deleted": {}})
         if path.endswith("/finalize"):
             return finalize_response()
         if path.endswith("/v1/chat/completions"):
@@ -120,7 +122,10 @@ def test_attack_success_prints_asr_and_chain(
     assert code == 0
     assert "ASR: 100%" in output
     assert "successful: 1/1" in output
-    assert steps == ["adapt", "payload", "finalize", "trigger"]
+    assert "isolation" in output
+    assert "on" in output
+    assert steps == ["isolate", "adapt", "payload", "persist", "trigger"]
+    assert report["isolation"] == "on"
     assert "planner" in actors
     assert "attacker" in actors
     assert "victim" in actors
@@ -298,8 +303,9 @@ def test_default_runs_all_catalog_attacks(
     assert "Все сценарии" in output
     probe_steps = [step["name"] for step in payload["runs"][0]["traces"][0]["steps"]]
     memory_steps = [step["name"] for step in payload["runs"][1]["traces"][0]["steps"]]
-    assert "finalize" not in probe_steps
-    assert memory_steps == ["adapt", "payload", "finalize", "trigger"]
+    assert "persist" not in probe_steps
+    assert probe_steps[0] == "isolate"
+    assert memory_steps == ["isolate", "adapt", "payload", "persist", "trigger"]
 
 
 def test_empty_catalog_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -403,7 +409,7 @@ def test_http_error_stops_chain(capsys: pytest.CaptureFixture[str]) -> None:
     output = capsys.readouterr().out
     assert code == 0
     assert "payload" in output
-    assert "finalize" not in output
+    assert "persist" not in output
     assert "trigger" not in output
     assert "HTTP 500" in output
     assert '"traces": []' in output
@@ -424,8 +430,10 @@ def test_trigger_uses_victim_bearer(capsys: pytest.CaptureFixture[str]) -> None:
     auths_by_step: list[tuple[str, str]] = []
     for request in stand.requests:
         auth = request.headers["Authorization"]
-        if request.url.path.endswith("/finalize"):
-            auths_by_step.append(("finalize", auth))
+        if request.url.path.rstrip("/").endswith("/memory/reset"):
+            auths_by_step.append(("isolate", auth))
+        elif request.url.path.endswith("/finalize"):
+            auths_by_step.append(("persist", auth))
         elif request.url.path.endswith("/chat/completions"):
             body = json.loads(request.content.decode("utf-8"))
             session_id = body.get("session_id")
@@ -435,9 +443,10 @@ def test_trigger_uses_victim_bearer(capsys: pytest.CaptureFixture[str]) -> None:
             name = "trigger" if session_id.startswith("ra-b-") else "payload"
             auths_by_step.append((name, auth))
     assert auths_by_step == [
+        ("isolate", f"Bearer {API_KEY}"),
         ("adapt", f"Bearer {PLANNER_KEY}"),
         ("payload", f"Bearer {API_KEY}"),
-        ("finalize", f"Bearer {API_KEY}"),
+        ("persist", f"Bearer {API_KEY}"),
         ("trigger", f"Bearer {VICTIM_KEY}"),
     ]
 
@@ -454,6 +463,8 @@ def test_two_attempts_use_distinct_sessions_and_partial_asr(
         def _handle(self, request: httpx.Request) -> httpx.Response:
             self.requests.append(request)
             path = request.url.path
+            if path.rstrip("/").endswith("/memory/reset"):
+                return httpx.Response(200, json={"status": "reset", "deleted": {}})
             if path.endswith("/finalize"):
                 return finalize_response()
             body = json.loads(request.content.decode("utf-8"))
@@ -498,13 +509,15 @@ def test_debug_prints_steps_and_failed_traces(
     assert "debug" in captured.err
     assert "adapt" in captured.err
     assert "payload" in captured.err
-    assert "finalize" in captured.err
+    assert "persist" in captured.err
+    assert "isolate" in captured.err
     assert "scope=global" in captured.err
     assert TARGET_TICKER in captured.err
     assert API_KEY not in captured.err
     assert PLANNER_KEY not in captured.err
     assert report["traces"]
-    assert report["traces"][0]["steps"][0]["name"] == "adapt"
+    assert report["traces"][0]["steps"][0]["name"] == "isolate"
+    assert report["traces"][0]["steps"][1]["name"] == "adapt"
     assert report["asr"] == 0.0
 
 
@@ -538,7 +551,7 @@ def test_without_debug_stderr_has_no_request_bodies(
     assert code == 0
     assert "auth_mode" not in captured.err
     assert PLANNER_PAYLOAD not in captured.err
-    assert report["traces"][0]["steps"][0]["name"] == "adapt"
+    assert report["traces"][0]["steps"][0]["name"] == "isolate"
 
 
 def test_langfuse_missing_secret_exits_2_without_http(
@@ -619,13 +632,15 @@ def test_langfuse_records_success_and_failure_tags(
     assert "outcome:success" in export["tags"]
     assert "endpoint:/v1/chat/completions" in export["tags"]
     assert "endpoint:/v1/sessions/finalize" in export["tags"]
+    assert "endpoint:/v1/memory/reset" in export["tags"]
+    assert "isolation:on" in export["tags"]
     names = [item["name"] for item in export["dialogues"]]
     assert names == ["attacker", "victim"]
     attacker = export["dialogues"][0]
     victim = export["dialogues"][1]
     assert [msg["role"] for msg in attacker["messages"]] == ["user", "assistant"]
     assert attacker["messages"][0]["content"]
-    assert "facts" in attacker["finalize"]
+    assert "facts" in attacker["persist"]
     assert [msg["role"] for msg in victim["messages"]] == ["user", "assistant"]
     planner = next(event for event in sink.dialogue_events if event["kind"] == "planner")
     stand = next(event for event in sink.dialogue_events if event["kind"] == "stand")
@@ -654,6 +669,111 @@ def test_langfuse_records_failed_probe_without_finalize(
     assert "outcome:failure" in export["tags"]
     assert "endpoint:/v1/chat/completions" in export["tags"]
     assert "endpoint:/v1/sessions/finalize" not in export["tags"]
+    assert "endpoint:/v1/memory/reset" in export["tags"]
+    assert "isolation:on" in export["tags"]
     assert export["dialogues"]
     assert all(item["name"] == "attacker" for item in export["dialogues"])
-    assert all("finalize" not in item for item in export["dialogues"])
+    assert all("persist" not in item for item in export["dialogues"])
+
+
+def test_isolate_off_skips_reset_and_warns(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--isolate", "off"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "наследовать память" in captured.err
+    assert "ASR не независим" in captured.err
+    assert "isolation" in captured.out
+    assert not any(
+        request.url.path.rstrip("/").endswith("/memory/reset") for request in stand.requests
+    )
+
+
+def test_isolate_off_from_env(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd(),
+        environ={**LLM_ENV, "RED_ALERT_ISOLATE": "off"},
+        http_client=stand.client(),
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "наследовать память" in captured.err
+    assert not any(
+        request.url.path.rstrip("/").endswith("/memory/reset") for request in stand.requests
+    )
+
+
+def test_isolate_flag_overrides_env(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--isolate", "on"),
+        environ={**LLM_ENV, "RED_ALERT_ISOLATE": "off"},
+        http_client=stand.client(),
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "наследовать память" not in captured.err
+    assert any(request.url.path.rstrip("/").endswith("/memory/reset") for request in stand.requests)
+
+
+def test_invalid_isolate_exits_2_without_http(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--isolate", "maybe"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "isolate" in err
+    assert stand.requests == []
+
+
+def test_isolate_failed_exits_1_without_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "report.json"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.rstrip("/").endswith("/memory/reset"):
+            return httpx.Response(
+                503,
+                json={"status": "reset_failed", "deleted": {}, "failed_at": "mongo"},
+            )
+        return StandMock()._handle(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    code = main(
+        attack_cmd("--output", str(path)),
+        environ=LLM_ENV,
+        http_client=client,
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Isolate не выполнен" in captured.err
+    assert "ASR:" not in captured.out
+    assert not path.exists()
+
+
+def test_isolate_off_langfuse_has_no_reset_tag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock()
+    sink = RecordingSink()
+    code = main(
+        attack_cmd("--isolate", "off"),
+        environ=LANGFUSE_ENV,
+        http_client=stand.client(),
+        trace_sink=sink,
+    )
+    capsys.readouterr()
+    assert code == 0
+    export = sink.exports[0]
+    assert "isolation:off" in export["tags"]
+    assert "endpoint:/v1/memory/reset" not in export["tags"]
+    assert sink.starts[0]["isolation"] == "off"

@@ -44,7 +44,7 @@
 #### Scenario: Ход атакующего читается как чат
 
 - **WHEN** экспорт включён и прошла попытка `flow: memory`
-- **THEN** есть диалог `attacker` с сообщениями user/assistant и `finalize.facts`, затем отдельный диалог `victim`
+- **THEN** есть диалог `attacker` с сообщениями user/assistant и `persist.facts`, затем отдельный диалог `victim`
 
 #### Scenario: Узел графа не содержит AttemptState
 
@@ -58,16 +58,16 @@
 
 #### Scenario: Развилки графа не попадают в Langfuse
 
-- **WHEN** LangGraph считает `after_adapt` / `after_inject` / `after_finalize`
+- **WHEN** LangGraph считает `after_adapt` / `after_inject` / `after_persist`
 - **THEN** для этих шагов в Langfuse нет отдельных span
 
 ### Requirement: Метки ручки и типа уязвимости
 
-СИСТЕМА ДОЛЖНА (MUST) помечать trace попытки тегом `vulnerability:<тип>` из YAML и тегами `endpoint:<путь>` для каждой уникальной ручки стенда в шагах попытки. Путь нормализуется: `/v1/chat/completions` и `/v1/sessions/finalize` без идентификатора сессии. Шаг планировщика в теги `endpoint:*` не входит.
+СИСТЕМА ДОЛЖНА (MUST) помечать trace попытки тегом `vulnerability:<тип>` из YAML и тегами `endpoint:<путь>` для каждой уникальной ручки стенда в шагах попытки. Путь нормализуется: `/v1/chat/completions`, `/v1/sessions/finalize` и `/v1/memory/reset` без идентификатора сессии. Шаг планировщика в теги `endpoint:*` не входит.
 
 #### Scenario: Memory-атака помечает чат и finalize
 
-- **WHEN** успешна попытка с `flow: memory` и шагами payload, finalize и trigger
+- **WHEN** успешна попытка с `flow: memory` и шагами payload, persist и trigger
 - **THEN** у trace есть теги `vulnerability:` из YAML, `endpoint:/v1/chat/completions` и `endpoint:/v1/sessions/finalize`
 
 #### Scenario: Probe не помечает finalize
@@ -79,6 +79,30 @@
 
 - **WHEN** в попытке есть шаг `adapt`
 - **THEN** теги `endpoint:*` не содержат URL планировщика
+
+### Requirement: Режим изоляции попадает в Langfuse
+
+СИСТЕМА ДОЛЖНА (MUST) при включённом экспорте помечать каждую попытку тегом `isolation:on` или `isolation:off` и тем же значением в metadata `isolation`. Если изоляция включена и isolate выполнился, в том же trace есть span isolate и тег `endpoint:/v1/memory/reset`.
+
+#### Scenario: Тег isolation on
+
+- **WHEN** экспорт включён и прогон идёт с изоляцией по умолчанию
+- **THEN** у trace попытки есть тег `isolation:on` и metadata `isolation` со значением `on`
+
+#### Scenario: Тег isolation off
+
+- **WHEN** экспорт включён и задано `--isolate off`
+- **THEN** у trace попытки есть тег `isolation:off` и нет `endpoint:/v1/memory/reset`
+
+#### Scenario: Isolate виден как span
+
+- **WHEN** экспорт включён, изоляция включена и isolate завершился успешно
+- **THEN** в trace попытки есть span isolate до узлов графа и тег `endpoint:/v1/memory/reset`
+
+#### Scenario: Вторая попытка той же уязвимости — полный trace
+
+- **WHEN** экспорт включён, изоляция включена и идут две попытки одного сценария
+- **THEN** у каждой попытки свой trace, и в каждом есть span isolate до узлов графа
 
 ### Requirement: Оценка успеха попытки
 
