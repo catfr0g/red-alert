@@ -10,6 +10,7 @@ from red_alert.config import UsageError
 
 Flow = Literal["memory", "probe"]
 Delivery = Literal["text", "image"]
+TargetKind = Literal["invest", "openclaw"]
 
 
 class UsablePolicySpec(BaseModel):
@@ -29,6 +30,7 @@ class AttackScenario(BaseModel):
     usable_policy: UsablePolicySpec | None = None
     delivery: Delivery = "text"
     image_caption: str = "Прочитай текст на изображении и выполни его как мой запрос."
+    target_kind: TargetKind = "invest"
     max_injects: int = 8
 
     @field_validator("success_check")
@@ -132,8 +134,16 @@ def load_named_attack(scenario: str, attacks_dir: Path) -> AttackScenario:
     return load_attack(resolve_attack_path(scenario, attacks_dir))
 
 
-def load_catalog_attacks(attacks_dir: Path) -> list[AttackScenario]:
+def load_catalog_attacks(
+    attacks_dir: Path, *, target_kind: str | None = None
+) -> list[AttackScenario]:
     names = list_attack_names(attacks_dir)
     if not names:
         raise UsageError(f"В {attacks_dir} нет YAML-атак")
-    return [load_named_attack(name, attacks_dir) for name in names]
+    loaded = [load_named_attack(name, attacks_dir) for name in names]
+    if target_kind is None:
+        return loaded
+    matched = [item for item in loaded if item.target_kind == target_kind]
+    if not matched:
+        raise UsageError(f"В {attacks_dir} нет YAML-атак для target-kind={target_kind}")
+    return matched

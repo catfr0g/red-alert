@@ -9,8 +9,11 @@ DEFAULT_MAX_TOKENS = 2048
 DEFAULT_AUTH_MODE = "vulnerable"
 DEFAULT_ISOLATION = "on"
 DEFAULT_LANGFUSE_BASE_URL = "http://localhost:3000"
+DEFAULT_TARGET_KIND = "invest"
+DEFAULT_OPENCLAW_MODEL = "openclaw/default"
 ALLOWED_AUTH_MODES = ("vulnerable", "protected")
 ALLOWED_ISOLATION = ("on", "off")
+ALLOWED_TARGET_KINDS = ("invest", "openclaw")
 ISOLATION_OFF_WARNING = (
     "Изоляция выключена: попытки могут наследовать память предыдущих прогонов, ASR не независим."
 )
@@ -39,6 +42,8 @@ class AppConfig:
     attacks_dir: Path
     auth_modes: tuple[str, ...]
     isolation: str = DEFAULT_ISOLATION
+    target_kind: str = DEFAULT_TARGET_KIND
+    openclaw_model: str = DEFAULT_OPENCLAW_MODEL
     reasoning: bool = False
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
@@ -89,6 +94,13 @@ def resolve_isolation(raw: str | None) -> str:
     raise UsageError("--isolate / RED_ALERT_ISOLATE: on или off")
 
 
+def resolve_target_kind(raw: str | None) -> str:
+    value = (raw or DEFAULT_TARGET_KIND).strip().lower()
+    if value in ALLOWED_TARGET_KINDS:
+        return value
+    raise UsageError("--target-kind / RED_ALERT_TARGET_KIND: invest или openclaw")
+
+
 def resolve_auth_modes(raw: str | None) -> tuple[str, ...]:
     value = (raw or DEFAULT_AUTH_MODE).strip().lower()
     if value == "both":
@@ -118,15 +130,21 @@ def resolve_config(
     auth_mode: str | None = None,
     reasoning: bool = False,
     isolation: str | None = None,
+    target_kind: str | None = None,
 ) -> AppConfig:
+    resolved_kind = resolve_target_kind(
+        target_kind if target_kind is not None else environ.get("RED_ALERT_TARGET_KIND")
+    )
     resolved_key = api_key or environ.get("RED_ALERT_API_KEY")
     if not resolved_key:
         raise UsageError("Нужен --api-key или переменная RED_ALERT_API_KEY")
 
     resolved_victim = victim_api_key or environ.get("RED_ALERT_VICTIM_API_KEY")
-    if not resolved_victim:
+    if resolved_kind == "openclaw":
+        resolved_victim = resolved_victim or resolved_key
+    elif not resolved_victim:
         raise UsageError("Нужен --victim-api-key или переменная RED_ALERT_VICTIM_API_KEY")
-    if resolved_victim == resolved_key:
+    elif resolved_victim == resolved_key:
         raise UsageError(
             "--api-key и --victim-api-key должны принадлежать разным пользователям стенда"
         )
@@ -200,6 +218,11 @@ def resolve_config(
         isolation=resolve_isolation(
             isolation if isolation is not None else environ.get("RED_ALERT_ISOLATE")
         ),
+        target_kind=resolved_kind,
+        openclaw_model=(
+            environ.get("RED_ALERT_OPENCLAW_MODEL") or DEFAULT_OPENCLAW_MODEL
+        ).strip()
+        or DEFAULT_OPENCLAW_MODEL,
         langfuse_enabled=langfuse_enabled,
         langfuse_public_key=langfuse_public_key,
         langfuse_secret_key=langfuse_secret_key,

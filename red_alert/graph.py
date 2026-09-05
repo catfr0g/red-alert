@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -54,7 +55,12 @@ def _assistant_text(payload: object) -> str:
     if not isinstance(message, dict):
         return ""
     content = message.get("content")
-    return content if isinstance(content, str) else ""
+    text = content if isinstance(content, str) else ""
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        dumped = json.dumps(tool_calls, ensure_ascii=False)
+        return f"{text}\n{dumped}".strip() if text else dumped
+    return text
 
 
 def _http_step(

@@ -3,6 +3,7 @@ from pathlib import Path
 from red_alert.config import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_OPENAI_BASE_URL,
+    DEFAULT_OPENCLAW_MODEL,
     UsageError,
     env_flag,
     normalize_llm_base,
@@ -11,6 +12,7 @@ from red_alert.config import (
     resolve_auth_modes,
     resolve_config,
     resolve_isolation,
+    resolve_target_kind,
 )
 
 LLM_ENV = {
@@ -65,6 +67,8 @@ def test_resolve_config_accepts_full_chat_url() -> None:
     assert config.attacks_dir.name == "attacks"
     assert config.auth_modes == ("vulnerable",)
     assert config.isolation == "on"
+    assert config.target_kind == "invest"
+    assert config.openclaw_model == DEFAULT_OPENCLAW_MODEL
 
 
 def test_resolve_config_reads_llm_overrides() -> None:
@@ -213,6 +217,32 @@ def test_langfuse_enabled_requires_secret() -> None:
         assert "LANGFUSE_SECRET_KEY" in str(exc)
     else:
         raise AssertionError("expected UsageError")
+
+
+def test_resolve_target_kind() -> None:
+    assert resolve_target_kind(None) == "invest"
+    assert resolve_target_kind("OPENCLAW") == "openclaw"
+    try:
+        resolve_target_kind("browser")
+    except UsageError as exc:
+        assert "target-kind" in str(exc)
+    else:
+        raise AssertionError("expected UsageError")
+
+
+def test_resolve_config_openclaw_reuses_api_key_as_victim() -> None:
+    config = resolve_config(
+        target="http://192.168.64.8:18789",
+        api_key="gateway-token",
+        victim_api_key=None,
+        scenario="openclaw-goal-hijack",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_TARGET_KIND": "openclaw"},
+    )
+    assert config.target_kind == "openclaw"
+    assert config.api_key == "gateway-token"
+    assert config.victim_api_key == "gateway-token"
+    assert config.openclaw_model == DEFAULT_OPENCLAW_MODEL
 
 
 def test_resolve_isolation() -> None:

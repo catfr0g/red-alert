@@ -8,6 +8,7 @@ from red_alert.graph import ACTOR_ATTACKER, OnStep, run_attempt, step_from_turn
 from red_alert.judge import AttackJudge
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.planner import PayloadPlanner
+from red_alert.openclaw_client import DEFAULT_OPENCLAW_MODEL, OpenClawTarget
 from red_alert.stand_client import InvestStandTarget
 from red_alert.target import IsolateError, Target
 from red_alert.tracing import TraceSink
@@ -32,19 +33,29 @@ def run_attack(
     auth_mode: str = "vulnerable",
     reasoning: bool = False,
     isolation: str = ISOLATION_ON,
+    target_kind: str = "invest",
+    openclaw_model: str = DEFAULT_OPENCLAW_MODEL,
     on_step: OnStep | None = None,
     on_attempt_done: Callable[[AttemptResult], None] | None = None,
     sink: TraceSink | None = None,
     secrets: Sequence[str] = (),
 ) -> RunReport:
-    stand = InvestStandTarget(
-        target,
-        api_key,
-        victim_api_key,
-        http_client,
-        auth_mode=auth_mode,
-        reasoning=reasoning,
-    )
+    if target_kind == "openclaw":
+        stand: Target = OpenClawTarget(
+            target,
+            api_key,
+            http_client,
+            model=openclaw_model,
+        )
+    else:
+        stand = InvestStandTarget(
+            target,
+            api_key,
+            victim_api_key,
+            http_client,
+            auth_mode=auth_mode,
+            reasoning=reasoning,
+        )
     results: list[AttemptResult] = []
     prior_notes = ""
     for index in range(1, attempts + 1):

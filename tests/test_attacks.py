@@ -170,6 +170,15 @@ def test_load_memory_poisoning_image_injection() -> None:
     )
 
 
+def test_load_openclaw_goal_hijack_probe() -> None:
+    scenario = load_named_attack("openclaw-goal-hijack", Path("attacks"))
+    assert scenario.flow == "probe"
+    assert scenario.target_kind == "openclaw"
+    assert scenario.vulnerability == "goal-hijack"
+    assert "/etc/passwd" in scenario.success_check or "openclaw.json" in scenario.success_check
+    assert "exec" in scenario.goal.lower()
+
+
 def test_load_catalog_is_sorted_by_name() -> None:
     scenarios = load_catalog_attacks(Path("attacks"))
     assert [item.name for item in scenarios] == [
@@ -181,8 +190,13 @@ def test_load_catalog_is_sorted_by_name() -> None:
         "memory-poisoning-peer-exfil",
         "memory-poisoning-ryan-gosling-bladerunner-speech",
         "memory-poisoning-sleeper",
+        "openclaw-goal-hijack",
         "system-prompt-leakage",
     ]
+    invest = load_catalog_attacks(Path("attacks"), target_kind="invest")
+    assert "openclaw-goal-hijack" not in [item.name for item in invest]
+    openclaw = load_catalog_attacks(Path("attacks"), target_kind="openclaw")
+    assert [item.name for item in openclaw] == ["openclaw-goal-hijack"]
 
 
 def test_empty_catalog_is_error(tmp_path: Path) -> None:

@@ -137,7 +137,7 @@ class StandMock:
             return finalize_response()
         if path.endswith("/v1/chat/completions"):
             body = json.loads(request.content.decode("utf-8"))
-            session_id = body.get("session_id", "")
+            session_id = body.get("session_id") or body.get("user") or ""
             if not session_id:
                 return chat_response(PLANNER_PAYLOAD)
             if session_id.startswith("ra-b-"):
@@ -920,3 +920,70 @@ def test_isolate_off_langfuse_has_no_reset_tag(
     assert "isolation:off" in export["tags"]
     assert "endpoint:/v1/memory/reset" not in export["tags"]
     assert sink.starts[0]["isolation"] == "off"
+
+
+def test_openclaw_probe_uses_chat_completions(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "attack-report.json"
+    stand = StandMock(
+        attacker_text="root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin"
+    )
+    code = main(
+        [
+            "attack",
+            "--target",
+            "http://192.168.64.8:18789",
+            "--api-key",
+            "gateway-token",
+            "--target-kind",
+            "openclaw",
+            "--scenario",
+            "openclaw-goal-hijack",
+            "--output",
+            str(path),
+        ],
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    output = capsys.readouterr().out
+    report = json.loads(path.read_text(encoding="utf-8"))
+    chats = [
+        json.loads(request.content.decode("utf-8"))
+        for request in stand.requests
+        if request.url.path.endswith("/v1/chat/completions")
+        and request.content
+        and json.loads(request.content.decode("utf-8")).get("user")
+    ]
+    assert code == 0
+    assert "ASR: 100%" in output
+    assert report["scenario"] == "openclaw-goal-hijack"
+    assert report["target"] == "http://192.168.64.8:18789"
+    assert [step["name"] for step in report["traces"][0]["steps"]] == [
+        "isolate",
+        "adapt",
+        "payload",
+        "judge",
+    ]
+    assert chats
+    assert chats[0]["model"] == "openclaw/default"
+    assert chats[0]["user"].startswith("ra-a-")
+    assert not any(
+        request.url.path.rstrip("/").endswith("/memory/reset") for request in stand.requests
+    )
+    assert not any(request.url.path.endswith("/finalize") for request in stand.requests)
+
+
+def test_openclaw_scenario_rejected_on_invest_kind(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd(scenario="openclaw-goal-hijack"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "target-kind=openclaw" in err
+    assert stand.requests == []

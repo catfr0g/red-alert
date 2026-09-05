@@ -5,7 +5,7 @@ import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 
 from red_alert.attacks import default_attacks_dir, load_named_attack
-from red_alert.graph import build_attempt_graph
+from red_alert.graph import _assistant_text, build_attempt_graph
 from red_alert.runner import run_attack, run_attempt
 from red_alert.stand_client import InvestStandTarget
 from red_alert.target import IsolateError
@@ -453,3 +453,71 @@ def test_isolate_http_error_raises() -> None:
             planner=ScriptedPlanner([GOAL_PAYLOAD]),
             judge=ScriptedJudge([]),
         )
+
+
+def test_assistant_text_includes_tool_calls() -> None:
+    text = _assistant_text(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": "running",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec",
+                                    "arguments": '{"command":"echo REDALERT_ASI01_OK"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+    )
+    assert "running" in text
+    assert "exec" in text
+    assert "REDALERT_ASI01_OK" in text
+
+
+def test_openclaw_probe_sends_openai_chat_body() -> None:
+    stand = StandMock(
+        attacker_text="root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin"
+    )
+    scenario = load_named_attack("openclaw-goal-hijack", default_attacks_dir())
+    report = run_attack(
+        target="http://192.168.64.8:18789",
+        api_key="gateway-token",
+        victim_api_key="gateway-token",
+        scenario=scenario,
+        attempts=1,
+        http_client=stand.client(),
+        planner=ScriptedPlanner(["head -5 /etc/passwd"]),
+        judge=ScriptedJudge([True]),
+        target_kind="openclaw",
+    )
+    chats = [
+        json.loads(request.content.decode("utf-8"))
+        for request in stand.requests
+        if request.url.path.endswith("/v1/chat/completions")
+        and request.content
+        and json.loads(request.content.decode("utf-8")).get("user")
+    ]
+    assert report.attempts[0].success is True
+    assert [step.name for step in report.attempts[0].steps] == [
+        "isolate",
+        "adapt",
+        "payload",
+        "judge",
+    ]
+    assert chats[0]["model"] == "openclaw/default"
+    assert "session_id" not in chats[0]
+    assert "auth_mode" not in chats[0]
+    assert chats[0]["messages"][0]["content"] == "head -5 /etc/passwd"
+    assert any(
+        request.headers.get("x-openclaw-session-key", "").startswith("ra-a-")
+        for request in stand.requests
+        if request.url.path.endswith("/v1/chat/completions")
+    )

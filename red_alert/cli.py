@@ -61,6 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Изоляция попыток: on или off. По умолчанию on",
     )
     attack.add_argument(
+        "--target-kind",
+        help="Тип цели: invest или openclaw. По умолчанию invest",
+    )
+    attack.add_argument(
         "--output",
         "-o",
         help="Записать JSON-трейсы успешных атак в UTF-8 файл",
@@ -73,10 +77,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_scenarios(scenario: str | None, attacks_dir: Path) -> list[AttackScenario]:
+def _load_scenarios(
+    scenario: str | None, attacks_dir: Path, target_kind: str
+) -> list[AttackScenario]:
     if scenario:
-        return [load_named_attack(scenario, attacks_dir)]
-    return load_catalog_attacks(attacks_dir)
+        loaded = load_named_attack(scenario, attacks_dir)
+        if loaded.target_kind != target_kind:
+            raise UsageError(
+                f"{loaded.name}: target-kind={loaded.target_kind}, нужен {target_kind}"
+            )
+        return [loaded]
+    return load_catalog_attacks(attacks_dir, target_kind=target_kind)
 
 
 def main(
@@ -112,8 +123,9 @@ def main(
             auth_mode=args.auth_mode,
             reasoning=args.reasoning,
             isolation=args.isolate,
+            target_kind=args.target_kind,
         )
-        scenarios = _load_scenarios(config.scenario, config.attacks_dir)
+        scenarios = _load_scenarios(config.scenario, config.attacks_dir, config.target_kind)
     except UsageError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -207,6 +219,8 @@ def main(
                             sink=sink,
                             secrets=secrets,
                             isolation=config.isolation,
+                            target_kind=config.target_kind,
+                            openclaw_model=config.openclaw_model,
                         )
                     )
             return reports
