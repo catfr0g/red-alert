@@ -28,6 +28,8 @@ flowchart LR
 | `openspec/changes/` | Активные и архивные change |
 | `docs/` | Продукт и бизнес-контекст |
 | `attacks/` | YAML-сценарии атак |
+| `script/` | Подготовка стенда: выпуск ключей в `.env` |
+| `Makefile` | Локальные цели: среда, ключи, Langfuse, проверки, атака |
 | `docker-compose.yml` | Локальный Langfuse |
 | `.env` | Секреты локально, не в git |
 
@@ -54,6 +56,7 @@ flowchart TD
 ```
 
 - `cli` — разбор аргументов, таймаут HTTP 180 с. Без `--scenario` гоняет все YAML каталога; печать отчёта и `--output` в UTF-8.
+- `script/fetch_stand_keys.py` — не часть `red-alert attack`: password grant в Keycloak, `POST /keys`, upsert `.env`.
 - `config` — `.env` + окружение + флаги. Нормализует target, `OPENAI_BASE_URL_ATTACK` и `OPENAI_BASE_URL_JUDGE`.
 - `planner` — OpenAI-совместимый чат для генерации payload. Использует `MODEL_ATTACK` и `OPENAI_BASE_URL_ATTACK`; ключ только в заголовке `Authorization`.
 - `judge` — независимый OpenAI-совместимый LLM-судья на `MODEL_JUDGE` и `OPENAI_BASE_URL_JUDGE`. Pydantic AI запрашивает структурированный `JudgeVerdict` и строго валидирует поле `success` как `bool` по `success_check` из YAML.

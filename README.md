@@ -17,15 +17,28 @@ PoC ходит на тестовый стенд [GenAI Investment Assistant](../
 ## Установка
 
 ```bash
-uv sync --group dev
-uv run pre-commit install
+make setup
 ```
+
+То же самое вручную: `uv sync --group dev` и `uv run pre-commit install`. Если `.env` нет, `make setup` копирует его из `.env.example`.
+
+Список целей: `make`. Нужен GNU Make (у Windows часто идёт вместе с Git/gcc).
 
 ## Конфигурация
 
 Скопируйте `.env.example` в `.env`. Нужны ключи стенда и отдельный ключ LLM планировщика. `.env` не коммитится.
 
 Ключи стенда должны принадлежать разным пользователям. Аргументы CLI перекрывают `.env`.
+
+После переподнятия стенда ключи пропадают. Их заново выпускает скрипт — без ручного SSO:
+
+```bash
+make keys
+```
+
+То же самое: `uv run python script/fetch_stand_keys.py`.
+
+По умолчанию это `client1001` (атакующий) и `client1002` (жертва). Адрес стенда, Keycloak и список пользователей задаются флагами или переменными, см. `.env.example`. Дополнительные логины сохраняются как `RED_ALERT_USER_<login>_API_KEY` — прогон атак их пока не читает.
 
 | Источник | Переменная / флаг | Назначение |
 |---|---|---|
@@ -52,8 +65,10 @@ uv run pre-commit install
 ## Запуск
 
 ```bash
-uv run red-alert attack --output attack-report.json --attempts 3
+make attack ARGS='--output attack-report.json --attempts 3'
 ```
+
+То же самое: `uv run red-alert attack --output attack-report.json --attempts 3`.
 
 Без `--scenario` CLI проходит все YAML в `attacks/` по алфавиту. `--attempts` — число попыток **каждого** сценария. В баре видно текущее имя и режим стенда.
 
@@ -95,8 +110,10 @@ uv run red-alert attack --scenario ./attacks/memory-poisoning.yaml
 Локальный Langfuse поднимается из корня репозитория (это не compose стенда):
 
 ```bash
-docker compose up -d
+make langfuse-up
 ```
+
+Остановить, сохранив данные: `make langfuse-down`. То же самое: `docker compose up -d` / `docker compose down`.
 
 UI: `http://localhost:3000`. Redis/Postgres/ClickHouse на хост не публикуются — иначе пересекаются со стендом (`:6379`). Headless init создаёт проект с ключами `pk-lf-local-dev` / `sk-lf-local-dev`. В `.env`:
 
@@ -112,10 +129,10 @@ LANGFUSE_BASE_URL=http://localhost:3000
 ## Проверки
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run pre-commit run --all-files
+make check
 ```
+
+То же самое: `uv run pytest`, `uv run ruff check .`, `uv run ty check`. Формат: `make fmt` или `uv run ruff format .`. Хуки целиком: `uv run pre-commit run --all-files`.
 
 Хуки: ruff, ty, pytest.
 
