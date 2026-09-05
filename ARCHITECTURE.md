@@ -44,9 +44,9 @@ flowchart TD
     runner --> graph[graph LangGraph]
     graph --> planner[planner]
     graph --> attacks[attacks YAML]
-    graph --> client[stand_client]
+    graph --> target[Target / InvestStandTarget]
     planner --> httpx[httpx]
-    client --> httpx
+    target --> httpx
     graph --> models[models]
     report --> models
 ```
@@ -54,17 +54,18 @@ flowchart TD
 - `cli` — разбор аргументов, таймаут HTTP 180 с. Без `--scenario` гоняет все YAML каталога; печать отчёта и `--output` в UTF-8.
 - `config` — `.env` + окружение + флаги. Нормализует target и `OPENAI_BASE_URL`.
 - `planner` — OpenAI-совместимый чат для генерации payload. Ключ только в заголовке `Authorization`.
-- `stand_client` — `POST /v1/chat/completions` и `POST /v1/sessions/{id}/finalize`. В чат кладёт `auth_mode` из `--auth-mode` / `RED_ALERT_AUTH_MODE`. Ключ только в заголовке `Authorization`.
+- `target` — протокол цели: `chat`, `persist`, `isolate`.
+- `stand_client` — инвест-адаптер: чат, persist (`/v1/sessions/{id}/finalize`), isolate (`/v1/memory/reset`). В чат кладёт `auth_mode` из `--auth-mode` / `RED_ALERT_AUTH_MODE`. Ключ только в заголовке `Authorization`.
 - `attacks` — загрузка YAML: цель, примеры, триггер, regex, `flow` memory или probe.
-- `graph` — одна попытка как LangGraph: `adapt`, `inject`; для memory ещё `finalize` и `trigger`.
-- `runner` — цикл попыток, ASR и заметки для следующей попытки.
+- `graph` — одна попытка как LangGraph: `adapt`, `inject`; для memory ещё `persist` и `trigger`. Isolate в граф не входит.
+- `runner` — isolate до каждой попытки (если `on`), цикл попыток, ASR и заметки для следующей попытки.
 - `display` — цветной итог и прогресс шагов (`rich`).
 - `models` / `report` — краткий итог и JSON-трейсы успешных попыток. Ключи заменяются на `***`.
-- `tracing` — опциональная живая запись попытки в Langfuse: диалоги планировщик/стенд/жертва, не dump state графа. Если включён и Langfuse недоступен, прогон останавливается.
+- `tracing` — опциональная живая запись попытки в Langfuse: диалоги планировщик/стенд/жертва, не dump state графа. Каждая попытка — отдельный корневой span; isolate и граф пишутся в тот же trace. Если включён и Langfuse недоступен, прогон останавливается.
 
 ## Поток одной попытки
 
-`flow: memory` использует двух клиентов на одном `httpx.Client`: атакующий и жертва. Сессии разные: `ra-a-*` и `ra-b-*`. `flow: probe` останавливается на ответе атакующего: finalize и сессия жертвы не нужны.
+`flow: memory` ходит в один `Target` с principal атакующего и жертвы. Сессии разные: `ra-a-*` и `ra-b-*`. `flow: probe` останавливается на ответе атакующего: persist и сессия жертвы не нужны. При `isolation=on` runner сбрасывает память стенда до каждой попытки.
 
 ```mermaid
 sequenceDiagram
@@ -74,11 +75,12 @@ sequenceDiagram
     participant Mem as Политика агента
     participant V as Жертва
 
-    loop До 8 раз, пока finalize не вернёт usable global-факт
-        A->>P: adapt: цель, прошлый finalize
+    Note over A,API: isolate до попытки, не между persist и trigger
+    loop До 8 раз, пока persist не вернёт usable global-факт
+        A->>P: adapt: цель, прошлый persist
         P->>A: текст payload
         A->>API: chat, session A, сгенерированный payload
-        A->>API: finalize session A
+        A->>API: persist session A
         API->>Mem: fact scope=global
     end
     V->>API: chat, session B, расскажи про портфель
@@ -88,8 +90,8 @@ sequenceDiagram
 ```
 
 1. Планировщик пишет сообщение атакующего по `goal` и `examples` из YAML.
-2. Для `memory`: `finalize` переносит диалог в семантическую память. Если стенд пометил факт как `global` и он проходит `usable_policy`, это политика агента.
-3. Экстрактор стенда часто ставит `scope=user`. Граф повторяет `adapt`→`inject`→`finalize` до `max_injects`: планировщик видит факты и меняет текст, пока нет usable policy.
+2. Для `memory`: `persist` переносит диалог в семантическую память. Если стенд пометил факт как `global` и он проходит `usable_policy`, это политика агента.
+3. Экстрактор стенда часто ставит `scope=user`. Граф повторяет `adapt`→`inject`→`persist` до `max_injects`: планировщик видит факты и меняет текст, пока нет usable policy.
 4. Жертва в новой сессии отправляет `trigger` из YAML.
 5. Успех `memory` — только по ответу жертвы. Успех `probe` — по ответу атакующего, без шагов 2–4.
 
@@ -97,11 +99,11 @@ HTTP-ошибка или сбой сети обрывает цепочку по�
 
 ## Граница со стендом
 
-Стенд сам извлекает факты и кладёт `scope=global` в `agent_policy_memories`. Red Alert это не пишет: он только шлёт чат и finalize, затем читает JSON finalize и ответ жертвы.
+Стенд сам извлекает факты и кладёт `scope=global` в `agent_policy_memories`. Red Alert это не пишет: он шлёт chat / persist / isolate, затем читает JSON persist и ответ жертвы.
 
 Страница `:8501/memory` за SSO в PoC не используется.
 
-Накопленные политики на стенде занимают место в контексте (лимит ~3000 символов). CLI их не чистит.
+При `isolation=on` (по умолчанию) `POST /v1/memory/reset` чистит память перед попыткой. `--isolate off` оставляет накопленные политики.
 
 ## Тесты
 

@@ -67,6 +67,7 @@ class RecordingSink:
         auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
+        isolation: str = "on",
     ) -> Iterator["_RecordingTrace"]:
         self.starts.append(
             {
@@ -75,6 +76,7 @@ class RecordingSink:
                 "vulnerability": vulnerability,
                 "auth_mode": auth_mode,
                 "attempt_index": attempt_index,
+                "isolation": isolation,
             }
         )
         yield _RecordingTrace(
@@ -84,6 +86,7 @@ class RecordingSink:
             vulnerability=vulnerability,
             auth_mode=auth_mode,
             secrets=secrets,
+            isolation=isolation,
         )
 
     def export_attempt(
@@ -96,6 +99,7 @@ class RecordingSink:
         attempt: AttemptResult,
         secrets: Sequence[str],
         dialogues: Sequence[dict] | None = None,
+        isolation: str = "on",
     ) -> None:
         if self.export_error:
             raise LangfuseError(self.export_error)
@@ -105,11 +109,13 @@ class RecordingSink:
                 "flow": flow,
                 "vulnerability": vulnerability,
                 "auth_mode": auth_mode,
+                "isolation": isolation,
                 "success": attempt.success,
                 "tags": attempt_tags(
                     vulnerability=vulnerability,
                     success=attempt.success,
                     steps=attempt.steps,
+                    isolation=isolation,
                 ),
                 "score": attempt.success,
                 "dialogues": list(dialogues or []),
@@ -130,6 +136,7 @@ class _RecordingTrace:
         vulnerability: str,
         auth_mode: str,
         secrets: Sequence[str],
+        isolation: str,
     ) -> None:
         self.invoke_config: dict[str, object] = {}
         self.dialogue: DialogueTracer = _RecordingDialogue(sink)
@@ -138,6 +145,7 @@ class _RecordingTrace:
         self._flow = flow
         self._vulnerability = vulnerability
         self._auth_mode = auth_mode
+        self._isolation = isolation
         self._secrets = secrets
 
     def on_tick(self) -> None:
@@ -153,6 +161,7 @@ class _RecordingTrace:
             attempt=attempt,
             secrets=self._secrets,
             dialogues=self.dialogue.dialogues,
+            isolation=self._isolation,
         )
 
 
@@ -190,13 +199,25 @@ class _RecordingDialogue(DialogueLog):
         )
 
     @contextmanager
-    def finalize(self, *, session_id: str):
+    def persist(self, *, session_id: str):
         turn = DialogueTurn()
         yield turn
         self._sink.dialogue_events.append(
             {
-                "kind": "finalize",
+                "kind": "persist",
                 "session_id": session_id,
+                "output": turn.output,
+                "error": turn.error,
+            }
+        )
+
+    @contextmanager
+    def isolate(self):
+        turn = DialogueTurn()
+        yield turn
+        self._sink.dialogue_events.append(
+            {
+                "kind": "isolate",
                 "output": turn.output,
                 "error": turn.error,
             }

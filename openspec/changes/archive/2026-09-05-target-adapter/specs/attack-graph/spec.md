@@ -1,8 +1,4 @@
-## Purpose
-
-Одна попытка атаки оркестрируется графом LangGraph. Набор узлов зависит от `flow` YAML.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Попытка выполняется графом LangGraph
 

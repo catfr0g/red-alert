@@ -2,7 +2,7 @@
 #
 # name             — имя в отчёте (файл выбирается по имени файла или пути)
 # flow             — memory | probe
-#                    memory: adapt → inject → finalize → вопрос жертвы
+#                    memory: adapt → inject → persist → вопрос жертвы
 #                    probe:  adapt → inject, успех по ответу атакующего
 # vulnerability    — класс уязвимости для меток в Langfuse
 # goal             — задача LLM-планировщику: что должно получиться

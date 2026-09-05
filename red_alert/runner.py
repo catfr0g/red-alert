@@ -3,15 +3,19 @@ from collections.abc import Callable, Sequence
 import httpx
 
 from red_alert.attacks import AttackScenario
-from red_alert.graph import OnStep, run_attempt
-from red_alert.models import AttemptResult, RunReport
+from red_alert.dialogue import DialogueTracer, NullDialogue
+from red_alert.graph import ACTOR_ATTACKER, OnStep, run_attempt, step_from_turn
+from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.planner import PayloadPlanner
-from red_alert.stand_client import StandClient
+from red_alert.stand_client import InvestStandTarget
+from red_alert.target import IsolateError, Target
 from red_alert.tracing import TraceSink
 
 __all__ = ["run_attempt", "run_attack"]
 
 NOTES_LIMIT = 2000
+ISOLATION_ON = "on"
+ISOLATION_OFF = "off"
 
 
 def run_attack(
@@ -24,23 +28,23 @@ def run_attack(
     http_client: httpx.Client,
     planner: PayloadPlanner,
     auth_mode: str = "vulnerable",
+    isolation: str = ISOLATION_ON,
     on_step: OnStep | None = None,
     on_attempt_done: Callable[[AttemptResult], None] | None = None,
     sink: TraceSink | None = None,
     secrets: Sequence[str] = (),
 ) -> RunReport:
-    attacker = StandClient(target, api_key, http_client, auth_mode=auth_mode)
-    victim = StandClient(target, victim_api_key, http_client, auth_mode=auth_mode)
+    stand = InvestStandTarget(target, api_key, victim_api_key, http_client, auth_mode=auth_mode)
     results: list[AttemptResult] = []
     prior_notes = ""
     for index in range(1, attempts + 1):
         if sink is None:
-            result = run_attempt(
-                attacker,
-                victim,
+            result = _run_one(
+                stand,
                 scenario,
                 index,
                 planner,
+                isolation,
                 on_step,
                 prior_notes,
             )
@@ -52,13 +56,14 @@ def run_attack(
                 auth_mode=auth_mode,
                 attempt_index=index,
                 secrets=secrets,
+                isolation=isolation,
             ) as graph_trace:
-                result = run_attempt(
-                    attacker,
-                    victim,
+                result = _run_one(
+                    stand,
                     scenario,
                     index,
                     planner,
+                    isolation,
                     on_step,
                     prior_notes,
                     invoke_config=graph_trace.invoke_config,
@@ -74,17 +79,65 @@ def run_attack(
         scenario=scenario.name,
         target=target,
         auth_mode=auth_mode,
+        isolation=isolation,
         attempts=results,
     )
 
 
+def _run_one(
+    stand: Target,
+    scenario: AttackScenario,
+    index: int,
+    planner: PayloadPlanner,
+    isolation: str,
+    on_step: OnStep | None,
+    prior_notes: str,
+    invoke_config: dict | None = None,
+    on_graph_tick: Callable[[], None] | None = None,
+    dialogue: DialogueTracer | None = None,
+) -> AttemptResult:
+    prefix: list[AttackStep] = []
+    if isolation == ISOLATION_ON:
+        prefix = _isolate(stand, on_step, dialogue)
+    return run_attempt(
+        stand,
+        scenario,
+        index,
+        planner,
+        on_step,
+        prior_notes,
+        invoke_config=invoke_config,
+        on_graph_tick=on_graph_tick,
+        dialogue=dialogue,
+        prefix_steps=prefix,
+    )
+
+
+def _isolate(
+    stand: Target,
+    on_step: OnStep | None,
+    dialogue: DialogueTracer | None,
+) -> list[AttackStep]:
+    log = dialogue or NullDialogue()
+    with log.isolate() as observed:
+        turn = stand.isolate()
+        step = step_from_turn(name="isolate", actor=ACTOR_ATTACKER, turn=turn)
+        if on_step is not None:
+            on_step(step)
+        if step.error:
+            observed.finish(output=step.response_body, error=step.error)
+            raise IsolateError(f"Isolate не выполнен: {step.error}", step)
+        observed.finish(output=step.response_body)
+    return [step]
+
+
 def _attempt_notes(result: AttemptResult) -> str:
     parts = [f"попытка {result.attempt_index}: success={result.success}"]
-    finalize = next((step for step in reversed(result.steps) if step.name == "finalize"), None)
+    persist = next((step for step in reversed(result.steps) if step.name == "persist"), None)
     trigger = next((step for step in reversed(result.steps) if step.name == "trigger"), None)
     payload = next((step for step in reversed(result.steps) if step.name == "payload"), None)
-    if finalize is not None and finalize.response_body is not None:
-        parts.append(f"finalize={finalize.response_body}")
+    if persist is not None and persist.response_body is not None:
+        parts.append(f"persist={persist.response_body}")
     if trigger is not None and trigger.response_body is not None:
         parts.append(f"victim={trigger.response_body}")
     elif payload is not None and payload.response_body is not None:

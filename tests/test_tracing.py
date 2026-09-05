@@ -22,6 +22,7 @@ from tests.test_config import LLM_ENV
 PLANNER_URL = "https://planner.test/v1/chat/completions"
 CHAT_URL = "http://localhost:8600/v1/chat/completions"
 FINALIZE_URL = "http://localhost:8600/v1/sessions/ra-a-abc123/finalize"
+RESET_URL = "http://localhost:8600/v1/memory/reset"
 
 
 def _config(**env: str):
@@ -42,6 +43,7 @@ def _step(name: str, url: str, actor: str, **kwargs) -> AttackStep:
 def test_stand_endpoint_normalizes_and_skips_planner() -> None:
     assert stand_endpoint(CHAT_URL, "attacker") == "/v1/chat/completions"
     assert stand_endpoint(FINALIZE_URL, "attacker") == "/v1/sessions/finalize"
+    assert stand_endpoint(RESET_URL, "attacker") == "/v1/memory/reset"
     assert stand_endpoint(PLANNER_URL, "planner") is None
 
 
@@ -51,15 +53,19 @@ def test_memory_tags_include_chat_and_finalize() -> None:
         success=True,
         steps=[
             _step("adapt", PLANNER_URL, "planner"),
+            _step("isolate", RESET_URL, "attacker"),
             _step("payload", CHAT_URL, "attacker"),
-            _step("finalize", FINALIZE_URL, "attacker"),
+            _step("persist", FINALIZE_URL, "attacker"),
             _step("trigger", CHAT_URL, "victim"),
         ],
+        isolation="on",
     )
     assert "outcome:success" in tags
     assert "vulnerability:memory-poisoning" in tags
+    assert "isolation:on" in tags
     assert "endpoint:/v1/chat/completions" in tags
     assert "endpoint:/v1/sessions/finalize" in tags
+    assert "endpoint:/v1/memory/reset" in tags
     assert not any("planner.test" in tag for tag in tags)
 
 
@@ -71,10 +77,13 @@ def test_probe_tags_omit_finalize() -> None:
             _step("adapt", PLANNER_URL, "planner"),
             _step("payload", CHAT_URL, "attacker"),
         ],
+        isolation="off",
     )
     assert "outcome:failure" in tags
+    assert "isolation:off" in tags
     assert "endpoint:/v1/chat/completions" in tags
     assert "endpoint:/v1/sessions/finalize" not in tags
+    assert "endpoint:/v1/memory/reset" not in tags
 
 
 def test_build_sink_disabled_is_null_even_with_keys() -> None:
@@ -97,6 +106,21 @@ def test_build_sink_enabled_uses_langfuse(monkeypatch: pytest.MonkeyPatch) -> No
         assert isinstance(build_sink(config, client), LangfuseSink)
 
 
+class _DummyObservation:
+    def __init__(self, *, trace_id: str = "a" * 32, span_id: str = "b" * 16) -> None:
+        self.trace_id = trace_id
+        self.id = span_id
+
+    def __enter__(self) -> _DummyObservation:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+    def update(self, **_kwargs: object) -> None:
+        return
+
+
 class _DummySdk:
     def flush(self) -> None:
         return
@@ -107,10 +131,15 @@ class _DummySdk:
     def create_score(self, **_kwargs) -> None:
         return
 
+    def start_as_current_observation(self, **_kwargs: object) -> _DummyObservation:
+        return _DummyObservation()
+
 
 class _FakeHandler:
     def __init__(self, **_kwargs) -> None:
         self.last_trace_id = "a" * 32
+        context = _kwargs.get("trace_context")
+        self.trace_context: dict[str, str] = context if isinstance(context, dict) else {}
 
 
 class _FlushErrorSdk(_DummySdk):
@@ -177,7 +206,7 @@ def _complete_attempt(sink: LangfuseSink, *, secret: str = "", success: bool = T
                 response_body={"ok": True},
             ),
             _step("payload", CHAT_URL, "attacker"),
-            _step("finalize", FINALIZE_URL, "attacker"),
+            _step("persist", FINALIZE_URL, "attacker"),
         ],
     )
     with sink.trace_attempt(
@@ -252,16 +281,17 @@ def test_trace_attempt_uses_langfuse_callback_handler(monkeypatch: pytest.Monkey
         assert isinstance(callbacks, list) and callbacks
         assert isinstance(callbacks[0], _FakeHandler)
         assert session.invoke_config["run_name"] == "memory-poisoning:1"
+        assert callbacks[0].trace_context == {"trace_id": "a" * 32, "parent_span_id": "b" * 16}
 
 
 def test_router_runs_are_hidden_from_langfuse() -> None:
     assert is_hidden_graph_run("after_adapt")
     assert is_hidden_graph_run("after_inject")
-    assert is_hidden_graph_run("after_finalize")
+    assert is_hidden_graph_run("after_persist")
     assert is_hidden_graph_run("ChannelWrite")
     assert not is_hidden_graph_run("adapt")
     assert not is_hidden_graph_run("inject")
-    assert not is_hidden_graph_run("finalize")
+    assert not is_hidden_graph_run("persist")
     assert not is_hidden_graph_run("trigger")
 
 
@@ -288,6 +318,104 @@ def test_graph_node_io_is_dialogue_not_attempt_state() -> None:
     assert graph_node_output("inject", state)["messages"] == [
         {"role": "assistant", "content": "принято"}
     ]
+
+
+class _RecordingObservation:
+    def __init__(self, sdk: "_RecordingSdk", kwargs: dict) -> None:
+        self.sdk = sdk
+        self.kwargs = kwargs
+        self.trace_id = kwargs.get("forced_trace_id") or f"{len(sdk.started):032x}"
+        self.id = f"{len(sdk.started):016x}"
+        self.parent: _RecordingObservation | None = None
+
+    def __enter__(self) -> _RecordingObservation:
+        self.parent = self.sdk.stack[-1] if self.sdk.stack else None
+        self.sdk.stack.append(self)
+        self.sdk.started.append(self)
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        self.sdk.stack.pop()
+        return False
+
+    def update(self, **_kwargs: object) -> None:
+        return
+
+
+class _RecordingSdk:
+    def __init__(self) -> None:
+        self.stack: list[_RecordingObservation] = []
+        self.started: list[_RecordingObservation] = []
+
+    def flush(self) -> None:
+        return
+
+    def shutdown(self) -> None:
+        return
+
+    def start_as_current_observation(self, **kwargs: object) -> _RecordingObservation:
+        return _RecordingObservation(self, dict(kwargs))
+
+
+def test_second_attempt_keeps_isolate_on_its_own_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdk = _RecordingSdk()
+    handlers: list[_FakeHandler] = []
+
+    class _CapturingHandler(_FakeHandler):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.last_trace_id = "stale" * 8
+            handlers.append(self)
+
+    monkeypatch.setattr("red_alert.tracing.Langfuse", lambda **_kwargs: sdk)
+    monkeypatch.setattr("red_alert.tracing.GraphCallbackHandler", _CapturingHandler)
+    mock = _LangfuseMock()
+    sink = LangfuseSink(
+        public_key="pk-lf-test",
+        secret_key="sk-lf-secret",
+        base_url="http://langfuse.test",
+        http_client=mock.client(),
+    )
+    attempt = AttemptResult(
+        attempt_index=1,
+        success=True,
+        session_a="ra-a-1",
+        session_b="ra-b-1",
+        steps=[_step("isolate", RESET_URL, "attacker"), _step("payload", CHAT_URL, "attacker")],
+    )
+    for index in (1, 2):
+        with sink.trace_attempt(
+            scenario="memory-poisoning",
+            flow="memory",
+            vulnerability="memory-poisoning",
+            auth_mode="vulnerable",
+            attempt_index=index,
+            secrets=(),
+            isolation="on",
+        ) as session:
+            with session.dialogue.isolate() as turn:
+                turn.finish(output={"status": "reset"})
+            session.complete(attempt)
+
+    roots = [item for item in sdk.started if item.kwargs["name"].startswith("memory-poisoning:")]
+    isolates = [item for item in sdk.started if item.kwargs["name"] == "isolate"]
+    assert len(roots) == 2
+    assert len(isolates) == 2
+    assert isolates[0].parent is roots[0]
+    assert isolates[1].parent is roots[1]
+    assert isolates[0].kwargs["trace_context"]["trace_id"] == roots[0].trace_id
+    assert isolates[1].kwargs["trace_context"]["trace_id"] == roots[1].trace_id
+    assert roots[0].trace_id != roots[1].trace_id
+    assert handlers[0].trace_context["trace_id"] == roots[0].trace_id
+    assert handlers[1].trace_context["trace_id"] == roots[1].trace_id
+    ingestions = [req for req in mock.requests if req.url.path.endswith("/ingestion")]
+    ingested_ids = [
+        json.loads(req.content.decode("utf-8"))["batch"][0]["body"]["id"] for req in ingestions
+    ]
+    assert ingested_ids == [roots[0].trace_id, roots[1].trace_id]
+    assert "stale" * 8 not in ingested_ids
 
 
 def test_export_sends_tags_score_and_masks_secrets(monkeypatch: pytest.MonkeyPatch) -> None:

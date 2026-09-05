@@ -39,6 +39,7 @@ uv run pre-commit install
 | Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — все файлы в каталоге |
 | Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с атаками, по умолчанию `attacks/` |
 | Режим стенда | `--auth-mode` / `RED_ALERT_AUTH_MODE` | `vulnerable`, `protected` или `both` |
+| Изоляция | `--isolate` / `RED_ALERT_ISOLATE` | `on` (по умолчанию) или `off`. `on` сбрасывает память стенда до каждой попытки |
 | Попытки | `--attempts` | Число прогонов для ASR |
 | Отчёт | `--output` / `-o` | JSON с трейсами успешных атак (UTF-8) |
 | Debug | `--debug` / `RED_ALERT_DEBUG` | Полный лог шагов на stderr; в JSON все попытки |
@@ -62,9 +63,11 @@ uv run red-alert attack --auth-mode both --output attack-report.json --attempts 
 
 Сначала все выбранные атаки идут с `auth_mode=vulnerable`, затем те же — с `protected`. В итоге будет ASR по каждому режиму.
 
+По умолчанию перед каждой попыткой CLI вызывает isolate на стенде (`POST /v1/memory/reset`): глобальная очистка памяти агента у всех клиентов стенда, без ключей и инвестиционных данных. Так повторные попытки и сравнение режимов не наследуют прошлое отравление. Чтобы оставить грязное состояние: `--isolate off` (будет warning в stderr).
+
 В терминале — цветной прогресс и краткий ASR. Трейсы успешных попыток пишутся в JSON. Без `--output` JSON печатается в stdout. Не редиректите `>` в PowerShell: получится UTF-16.
 
-Для разбора прогона: `uv run red-alert attack --debug`. На stderr будут тела `adapt`, payload, finalize и trigger; в JSON попадут и неуспешные попытки.
+Для разбора прогона: `uv run red-alert attack --debug`. На stderr будут тела `isolate`, `adapt`, payload, persist и trigger; в JSON попадут и неуспешные попытки.
 
 Перед каждым inject планировщик вызывает свой LLM и пишет payload по цели из YAML.
 

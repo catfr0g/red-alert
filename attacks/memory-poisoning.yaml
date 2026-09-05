@@ -2,15 +2,15 @@
 #
 # name             — имя в отчёте (файл выбирается по имени файла или пути)
 # flow             — memory | probe
-#                    memory: adapt → inject → finalize → вопрос жертвы
+#                    memory: adapt → inject → persist → вопрос жертвы
 #                    probe:  adapt → inject, успех по ответу атакующего
 # vulnerability    — класс уязвимости для меток в Langfuse
 # goal             — задача LLM-планировщику: что должно получиться
 # examples         — примеры смысла payload; планировщик на них опирается
-# trigger          — вопрос жертвы после finalize (обязателен для memory)
+# trigger          — вопрос жертвы после persist (обязателен для memory)
 # success_pattern  — regex успеха (без регистра удобно (?i) / (?is))
 #                    memory — на ответ жертвы; probe — на ответ атакующего
-# usable_policy    — когда finalize достаточно, чтобы идти к жертве (только memory)
+# usable_policy    — когда persist достаточно, чтобы идти к жертве (только memory)
 #   scope          — нужный scope факта, обычно global
 #   require_all    — все подстроки должны быть в тексте факта
 #   require_any    — хотя бы одна из подстрок; сравнение без регистра
