@@ -1,6 +1,7 @@
 import json
 
 import httpx
+from langchain_core.callbacks import BaseCallbackHandler
 
 from red_alert.attacks import default_attacks_dir, load_named_attack
 from red_alert.graph import build_attempt_graph
@@ -19,6 +20,38 @@ GOAL_PAYLOAD = (
 
 def memory_scenario():
     return load_named_attack("memory-poisoning", default_attacks_dir())
+
+
+class _NodeCallback(BaseCallbackHandler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.names: list[str] = []
+        self.ticks = 0
+
+    def on_chain_start(self, serialized, inputs, *, name=None, **kwargs) -> None:
+        self.names.append(name or (serialized or {}).get("name") or "")
+
+
+def test_run_attempt_streams_callbacks_and_ticks() -> None:
+    stand = StandMock()
+    handler = _NodeCallback()
+
+    def on_tick() -> None:
+        handler.ticks += 1
+
+    client = stand.client()
+    result = run_attempt(
+        StandClient("http://localhost:8600", ATTACKER_KEY, client),
+        StandClient("http://localhost:8600", VICTIM_KEY, client),
+        memory_scenario(),
+        1,
+        ScriptedPlanner([GOAL_PAYLOAD]),
+        invoke_config={"callbacks": [handler]},
+        on_graph_tick=on_tick,
+    )
+    assert result.success is True
+    assert handler.ticks >= 3
+    assert {"adapt", "inject", "finalize", "trigger"}.issubset(set(handler.names))
 
 
 def test_attempt_graph_has_adapt_inject_finalize_trigger() -> None:

@@ -42,6 +42,9 @@ uv run pre-commit install
 | Попытки | `--attempts` | Число прогонов для ASR |
 | Отчёт | `--output` / `-o` | JSON с трейсами успешных атак (UTF-8) |
 | Debug | `--debug` / `RED_ALERT_DEBUG` | Полный лог шагов на stderr; в JSON все попытки |
+| Langfuse | `RED_ALERT_LANGFUSE` | `1` / `true` / `yes` / `on` — писать все попытки в Langfuse |
+| Langfuse | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Ключи проекта (обязательны, если экспорт включён) |
+| Langfuse | `LANGFUSE_BASE_URL` | По умолчанию `http://localhost:3000` |
 
 ## Запуск
 
@@ -76,7 +79,26 @@ uv run red-alert attack --scenario cross-user-portfolio
 uv run red-alert attack --scenario ./attacks/memory-poisoning.yaml
 ```
 
-Код выхода: `0` если прогон завершён (в том числе при ASR 0%), `2` при ошибке ввода.
+Код выхода: `0` если прогон завершён (в том числе при ASR 0%), `1` если Langfuse включён и не работает, `2` при ошибке ввода.
+
+## Langfuse
+
+Локальный Langfuse поднимается из корня репозитория (это не compose стенда):
+
+```bash
+docker compose up -d
+```
+
+UI: `http://localhost:3000`. Redis/Postgres/ClickHouse на хост не публикуются — иначе пересекаются со стендом (`:6379`). Headless init создаёт проект с ключами `pk-lf-local-dev` / `sk-lf-local-dev`. В `.env`:
+
+```
+RED_ALERT_LANGFUSE=1
+LANGFUSE_PUBLIC_KEY=pk-lf-local-dev
+LANGFUSE_SECRET_KEY=sk-lf-local-dev
+LANGFUSE_BASE_URL=http://localhost:3000
+```
+
+Без `RED_ALERT_LANGFUSE` экспорт выключен. Если флаг включён, а Langfuse недоступен — CLI останавливается с кодом 1, JSON-отчёт не печатается. Граф попытки пишется в реальном времени. В Langfuse это диалоги (планировщик ↔ стенд, затем жертва), не dump внутреннего state. У trace — теги исхода, ручки стенда и `vulnerability` из YAML.
 
 ## Проверки
 

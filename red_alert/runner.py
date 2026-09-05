@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import httpx
 
@@ -7,6 +7,7 @@ from red_alert.graph import OnStep, run_attempt
 from red_alert.models import AttemptResult, RunReport
 from red_alert.planner import PayloadPlanner
 from red_alert.stand_client import StandClient
+from red_alert.tracing import TraceSink
 
 __all__ = ["run_attempt", "run_attack"]
 
@@ -25,21 +26,46 @@ def run_attack(
     auth_mode: str = "vulnerable",
     on_step: OnStep | None = None,
     on_attempt_done: Callable[[AttemptResult], None] | None = None,
+    sink: TraceSink | None = None,
+    secrets: Sequence[str] = (),
 ) -> RunReport:
     attacker = StandClient(target, api_key, http_client, auth_mode=auth_mode)
     victim = StandClient(target, victim_api_key, http_client, auth_mode=auth_mode)
     results: list[AttemptResult] = []
     prior_notes = ""
     for index in range(1, attempts + 1):
-        result = run_attempt(
-            attacker,
-            victim,
-            scenario,
-            index,
-            planner,
-            on_step,
-            prior_notes,
-        )
+        if sink is None:
+            result = run_attempt(
+                attacker,
+                victim,
+                scenario,
+                index,
+                planner,
+                on_step,
+                prior_notes,
+            )
+        else:
+            with sink.trace_attempt(
+                scenario=scenario.name,
+                flow=scenario.flow,
+                vulnerability=scenario.vulnerability,
+                auth_mode=auth_mode,
+                attempt_index=index,
+                secrets=secrets,
+            ) as graph_trace:
+                result = run_attempt(
+                    attacker,
+                    victim,
+                    scenario,
+                    index,
+                    planner,
+                    on_step,
+                    prior_notes,
+                    invoke_config=graph_trace.invoke_config,
+                    on_graph_tick=graph_trace.on_tick,
+                    dialogue=graph_trace.dialogue,
+                )
+                graph_trace.complete(result)
         results.append(result)
         prior_notes = _attempt_notes(result)
         if on_attempt_done is not None:

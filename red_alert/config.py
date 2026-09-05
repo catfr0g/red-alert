@@ -7,6 +7,7 @@ DEFAULT_TARGET = "http://localhost:8600"
 DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_AUTH_MODE = "vulnerable"
+DEFAULT_LANGFUSE_BASE_URL = "http://localhost:3000"
 ALLOWED_AUTH_MODES = ("vulnerable", "protected")
 CHAT_COMPLETIONS_SUFFIX = "/v1/chat/completions"
 CHAT_COMPLETIONS_TAIL = "/chat/completions"
@@ -30,6 +31,10 @@ class AppConfig:
     debug: bool
     attacks_dir: Path
     auth_modes: tuple[str, ...]
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = DEFAULT_LANGFUSE_BASE_URL
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -139,6 +144,17 @@ def resolve_config(
         packaged = Path(__file__).resolve().parent.parent / "attacks"
         resolved_attacks_dir = cwd_attacks if cwd_attacks.is_dir() else packaged
 
+    langfuse_enabled = env_flag(environ.get("RED_ALERT_LANGFUSE"))
+    langfuse_public_key = (environ.get("LANGFUSE_PUBLIC_KEY") or "").strip()
+    langfuse_secret_key = (environ.get("LANGFUSE_SECRET_KEY") or "").strip()
+    langfuse_base_url = (
+        (environ.get("LANGFUSE_BASE_URL") or DEFAULT_LANGFUSE_BASE_URL).strip().rstrip("/")
+    )
+    if langfuse_enabled and not langfuse_public_key:
+        raise UsageError("Нужна переменная LANGFUSE_PUBLIC_KEY")
+    if langfuse_enabled and not langfuse_secret_key:
+        raise UsageError("Нужна переменная LANGFUSE_SECRET_KEY")
+
     return AppConfig(
         target=resolved_target,
         api_key=resolved_key,
@@ -152,4 +168,8 @@ def resolve_config(
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
         auth_modes=resolve_auth_modes(auth_mode or environ.get("RED_ALERT_AUTH_MODE")),
+        langfuse_enabled=langfuse_enabled,
+        langfuse_public_key=langfuse_public_key,
+        langfuse_secret_key=langfuse_secret_key,
+        langfuse_base_url=langfuse_base_url,
     )

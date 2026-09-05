@@ -28,6 +28,7 @@ flowchart LR
 | `openspec/changes/` | Активные и архивные change |
 | `docs/` | Продукт и бизнес-контекст |
 | `attacks/` | YAML-сценарии атак |
+| `docker-compose.yml` | Локальный Langfuse |
 | `.env` | Секреты локально, не в git |
 
 ## Модули
@@ -38,6 +39,8 @@ flowchart TD
     cli --> config[config]
     cli --> runner[runner]
     cli --> report[report]
+    cli --> tracing[tracing Langfuse]
+    tracing --> httpx[httpx]
     runner --> graph[graph LangGraph]
     graph --> planner[planner]
     graph --> attacks[attacks YAML]
@@ -57,6 +60,7 @@ flowchart TD
 - `runner` — цикл попыток, ASR и заметки для следующей попытки.
 - `display` — цветной итог и прогресс шагов (`rich`).
 - `models` / `report` — краткий итог и JSON-трейсы успешных попыток. Ключи заменяются на `***`.
+- `tracing` — опциональная живая запись попытки в Langfuse: диалоги планировщик/стенд/жертва, не dump state графа. Если включён и Langfuse недоступен, прогон останавливается.
 
 ## Поток одной попытки
 

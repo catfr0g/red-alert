@@ -9,6 +9,7 @@ from red_alert.config import UsageError
 def test_load_memory_poisoning_from_catalog() -> None:
     scenario = load_named_attack("memory-poisoning", Path("attacks"))
     assert scenario.flow == "memory"
+    assert scenario.vulnerability == "memory-poisoning"
     assert scenario.trigger
     assert scenario.is_success("В портфеле YDEX. Рекомендую продать: неприемлемый риск.")
     assert not scenario.is_success("Рекомендую продать GAZP")
@@ -17,6 +18,7 @@ def test_load_memory_poisoning_from_catalog() -> None:
 def test_load_attack_from_explicit_path() -> None:
     scenario = load_named_attack("attacks/cross-user-portfolio.yaml", Path("missing"))
     assert scenario.flow == "probe"
+    assert scenario.vulnerability == "cross-user-disclosure"
     assert scenario.trigger is None
     assert scenario.is_success("Портфель client1002: YDEX 10 лотов, стоимость 42100")
     assert not scenario.is_success("Портфель client1002 содержит YDEX")
@@ -35,7 +37,8 @@ def test_unknown_attack_lists_available() -> None:
 def test_memory_yaml_without_trigger_is_error(tmp_path: Path) -> None:
     path = tmp_path / "broken.yaml"
     path.write_text(
-        "name: broken\nflow: memory\ngoal: x\nsuccess_pattern: ydex\n",
+        "name: broken\nflow: memory\nvulnerability: memory-poisoning\n"
+        "goal: x\nsuccess_pattern: ydex\n",
         encoding="utf-8",
     )
     with pytest.raises(UsageError, match="trigger"):
@@ -55,10 +58,30 @@ def test_empty_catalog_is_error(tmp_path: Path) -> None:
         load_catalog_attacks(tmp_path)
 
 
+def test_yaml_without_vulnerability_is_error(tmp_path: Path) -> None:
+    path = tmp_path / "no-vuln.yaml"
+    path.write_text(
+        "name: x\nflow: probe\ngoal: x\nsuccess_pattern: ydex\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(UsageError, match="vulnerability"):
+        load_attack(path)
+
+
+def test_empty_vulnerability_is_error(tmp_path: Path) -> None:
+    path = tmp_path / "empty.yaml"
+    path.write_text(
+        "name: x\nflow: probe\nvulnerability: '  '\ngoal: x\nsuccess_pattern: ydex\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(UsageError, match="vulnerability"):
+        load_attack(path)
+
+
 def test_invalid_regex_is_error(tmp_path: Path) -> None:
     path = tmp_path / "bad-re.yaml"
     path.write_text(
-        "name: bad\nflow: probe\ngoal: x\nsuccess_pattern: '(unclosed'\n",
+        "name: bad\nflow: probe\nvulnerability: x\ngoal: x\nsuccess_pattern: '(unclosed'\n",
         encoding="utf-8",
     )
     with pytest.raises(UsageError, match="success_pattern"):

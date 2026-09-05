@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from red_alert.cli import main
+from tests.fakes import RecordingSink
 
 TARGET_TICKER = "YDEX"
 
@@ -22,6 +23,12 @@ LLM_ENV = {
     "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
     "MODEL": "openai/gpt-5-mini",
     "MAX_TOKENS": "256",
+}
+LANGFUSE_ENV = {
+    **LLM_ENV,
+    "RED_ALERT_LANGFUSE": "1",
+    "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
+    "LANGFUSE_SECRET_KEY": "sk-lf-secret",
 }
 
 
@@ -532,3 +539,121 @@ def test_without_debug_stderr_has_no_request_bodies(
     assert "auth_mode" not in captured.err
     assert PLANNER_PAYLOAD not in captured.err
     assert report["traces"][0]["steps"][0]["name"] == "adapt"
+
+
+def test_langfuse_missing_secret_exits_2_without_http(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd(),
+        environ={**LLM_ENV, "RED_ALERT_LANGFUSE": "1", "LANGFUSE_PUBLIC_KEY": "pk-lf-test"},
+        http_client=stand.client(),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "LANGFUSE_SECRET_KEY" in err
+    assert stand.requests == []
+
+
+def test_langfuse_ping_error_exits_1_without_stand_http(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock()
+    sink = RecordingSink(ping_error="Langfuse недоступен: HTTP 503")
+    code = main(
+        attack_cmd(),
+        environ=LANGFUSE_ENV,
+        http_client=stand.client(),
+        trace_sink=sink,
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Langfuse недоступен" in captured.err
+    assert stand.requests == []
+    assert "ASR:" not in captured.out
+    assert sink.exports == []
+
+
+def test_langfuse_export_error_exits_1_without_json_report(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock()
+    sink = RecordingSink(export_error="Не удалось записать trace в Langfuse: HTTP 500")
+    code = main(
+        attack_cmd(),
+        environ=LANGFUSE_ENV,
+        http_client=stand.client(),
+        trace_sink=sink,
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Не удалось записать" in captured.err
+    assert "sk-lf-secret" not in captured.err
+    assert "ASR:" not in captured.out
+    assert stand.requests
+
+
+def test_langfuse_records_success_and_failure_tags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock()
+    sink = RecordingSink()
+    code = main(
+        attack_cmd(),
+        environ=LANGFUSE_ENV,
+        http_client=stand.client(),
+        trace_sink=sink,
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert sink.ping_calls == 1
+    assert sink.closed is True
+    assert len(sink.starts) == 1
+    assert sink.starts[0]["scenario"] == "memory-poisoning"
+    assert len(sink.exports) == 1
+    export = sink.exports[0]
+    assert export["success"] is True
+    assert export["score"] is True
+    assert export["vulnerability"] == "memory-poisoning"
+    assert "outcome:success" in export["tags"]
+    assert "endpoint:/v1/chat/completions" in export["tags"]
+    assert "endpoint:/v1/sessions/finalize" in export["tags"]
+    names = [item["name"] for item in export["dialogues"]]
+    assert names == ["attacker", "victim"]
+    attacker = export["dialogues"][0]
+    victim = export["dialogues"][1]
+    assert [msg["role"] for msg in attacker["messages"]] == ["user", "assistant"]
+    assert attacker["messages"][0]["content"]
+    assert "facts" in attacker["finalize"]
+    assert [msg["role"] for msg in victim["messages"]] == ["user", "assistant"]
+    planner = next(event for event in sink.dialogue_events if event["kind"] == "planner")
+    stand = next(event for event in sink.dialogue_events if event["kind"] == "stand")
+    assert isinstance(planner["output"], str)
+    assert "AttemptState" not in json.dumps(sink.dialogue_events)
+    assert stand["input"] == [{"role": "user", "content": planner["output"]}]
+
+
+def test_langfuse_records_failed_probe_without_finalize(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stand = StandMock(attacker_text="отказ без утечки")
+    sink = RecordingSink()
+    code = main(
+        attack_cmd(scenario="cross-user-portfolio"),
+        environ=LANGFUSE_ENV,
+        http_client=stand.client(),
+        trace_sink=sink,
+    )
+    capsys.readouterr()
+    assert code == 0
+    export = sink.exports[0]
+    assert export["success"] is False
+    assert export["score"] is False
+    assert export["vulnerability"] == "cross-user-disclosure"
+    assert "outcome:failure" in export["tags"]
+    assert "endpoint:/v1/chat/completions" in export["tags"]
+    assert "endpoint:/v1/sessions/finalize" not in export["tags"]
+    assert export["dialogues"]
+    assert all(item["name"] == "attacker" for item in export["dialogues"])
+    assert all("finalize" not in item for item in export["dialogues"])
