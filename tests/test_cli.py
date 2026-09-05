@@ -1,14 +1,16 @@
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import httpx
 import pytest
+from rich.console import Console
 
 import red_alert.cli as cli_module
 from red_alert.cli import main as cli_main
 from red_alert.judge import AttackJudge
 from red_alert.planner import LlmConfig
+from red_alert.tracing import TraceSink
 from tests.fakes import RecordingSink, ScriptedJudge
 
 TARGET_TICKER = "YDEX"
@@ -37,11 +39,24 @@ LANGFUSE_ENV = {
 }
 
 
-def main(*args: object, judge: AttackJudge | None = None, **kwargs: object) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    judge: AttackJudge | None = None,
+    environ: Mapping[str, str] | None = None,
+    http_client: httpx.Client | None = None,
+    console: Console | None = None,
+    progress_console: Console | None = None,
+    trace_sink: TraceSink | None = None,
+) -> int:
     return cli_main(
-        *args,
+        argv,
         judge=judge or ScriptedJudge([True] * 32),
-        **kwargs,
+        environ=environ,
+        http_client=http_client,
+        console=console,
+        progress_console=progress_console,
+        trace_sink=trace_sink,
     )
 
 
@@ -579,6 +594,7 @@ def test_two_attempts_use_distinct_sessions_and_partial_asr(
         f"Сократите позицию {TARGET_TICKER}, это неприемлемый риск",
         "В портфеле Яндекс, его можно держать",
     ]
+
     class Alternating(StandMock):
         def _handle(self, request: httpx.Request) -> httpx.Response:
             self.requests.append(request)

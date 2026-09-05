@@ -8,21 +8,28 @@ PoC ходит на тестовый стенд [GenAI Investment Assistant](../
 
 ## Требования
 
-- Python 3.14+
-- [uv](https://docs.astral.sh/uv/)
+- Python 3.14+ (если его нет, `install.sh` / `install.ps1` скачает portable CPython)
 - Запущенный стенд `agent-api` (по умолчанию `http://localhost:8600`)
 - Два разных API-ключа стенда (атакующий и жертва, например `client1001` и `client1002`)
 - Ключ OpenAI-совместимого API для планировщика атак и судьи (`OPENAI_API_KEY`, `MODEL_ATTACK`, `MODEL_JUDGE`)
 
 ## Установка
 
+Linux и macOS:
+
 ```bash
-make setup
+./install.sh
 ```
 
-То же самое вручную: `uv sync --group dev` и `uv run pre-commit install`. Если `.env` нет, `make setup` копирует его из `.env.example`.
+Windows (PowerShell):
 
-Список целей: `make`. Нужен GNU Make (у Windows часто идёт вместе с Git/gcc).
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Скрипт находит Python 3.14+ или скачивает portable CPython 3.14.7 (`python-build-standalone`) в пользовательский кэш. Затем создаёт `.venv`, ставит runtime-зависимости из `requirements.txt` через pip, копирует `.env.example` в `.env`, если `.env` ещё нет, и добавляет команду `red-alert` в PATH (`~/.local/bin`). Существующий `.env` не трогает. После установки откройте новый терминал или проверьте, что `~/.local/bin` есть в PATH.
+
+Для разработки нужны [uv](https://docs.astral.sh/uv/) и GNU Make: `make setup` ставит dev-группу и git-хуки. Список целей: `make`.
 
 ## Конфигурация
 

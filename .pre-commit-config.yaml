@@ -12,6 +12,12 @@ repos:
         args: [--isolated]
   - repo: local
     hooks:
+      - id: export-requirements
+        name: export uv.lock to requirements.txt
+        entry: uv export --frozen --no-dev --no-hashes -o requirements.txt
+        language: system
+        files: ^(uv\.lock|pyproject\.toml)$
+        pass_filenames: false
       - id: pytest
         name: pytest
         entry: uv run pytest
