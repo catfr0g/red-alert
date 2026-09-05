@@ -54,6 +54,7 @@ make keys
 | Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — все файлы в каталоге |
 | Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с атаками, по умолчанию `attacks/` |
 | Режим стенда | `--auth-mode` / `RED_ALERT_AUTH_MODE` | `vulnerable`, `protected` или `both` |
+| Reasoning | `--reasoning` | Передавать `reasoning: true` во все chat-запросы к стенду; по умолчанию `false` |
 | Изоляция | `--isolate` / `RED_ALERT_ISOLATE` | `on` (по умолчанию) или `off`. `on` сбрасывает память стенда до каждой попытки |
 | Попытки | `--attempts` | Число прогонов для ASR |
 | Отчёт | `--output` / `-o` | JSON с трейсами успешных атак (UTF-8) |

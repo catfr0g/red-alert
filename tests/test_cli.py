@@ -159,6 +159,9 @@ def test_attack_success_prints_asr_and_chain(
     assert "global" in path.read_text(encoding="utf-8")
     bodies = [json.loads(req.content.decode()) for req in stand.requests if req.content]
     assert any(body.get("auth_mode") == "vulnerable" for body in bodies)
+    stand_chats = [body for body in bodies if body.get("session_id")]
+    assert stand_chats
+    assert all(body.get("reasoning") is False for body in stand_chats)
     llm_requests = [
         request
         for request in stand.requests
@@ -314,6 +317,21 @@ def test_auth_mode_protected_is_sent(capsys: pytest.CaptureFixture[str]) -> None
     stand_chats = [body for body in bodies if body.get("session_id")]
     assert stand_chats
     assert all(body.get("auth_mode") == "protected" for body in stand_chats)
+
+
+def test_reasoning_is_sent_to_all_stand_chats(capsys: pytest.CaptureFixture[str]) -> None:
+    stand = StandMock()
+    code = main(
+        attack_cmd("--reasoning"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    assert code == 0
+    capsys.readouterr()
+    bodies = [json.loads(req.content.decode()) for req in stand.requests if req.content]
+    stand_chats = [body for body in bodies if body.get("session_id")]
+    assert stand_chats
+    assert all(body.get("reasoning") is True for body in stand_chats)
 
 
 def test_auth_mode_both_runs_two_modes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

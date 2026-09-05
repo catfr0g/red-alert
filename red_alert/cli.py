@@ -50,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--auth-mode",
         help="Режим стенда: vulnerable, protected или both",
     )
+    attack.add_argument(
+        "--reasoning",
+        action="store_true",
+        help="Включить reasoning тестируемой модели стенда",
+    )
     attack.add_argument("--attempts", type=int, default=1, help="Число попыток каждого сценария")
     attack.add_argument(
         "--isolate",
@@ -105,6 +110,7 @@ def main(
             debug=args.debug,
             attacks_dir=args.attacks_dir,
             auth_mode=args.auth_mode,
+            reasoning=args.reasoning,
             isolation=args.isolate,
         )
         scenarios = _load_scenarios(config.scenario, config.attacks_dir)
@@ -195,6 +201,7 @@ def main(
                             planner=planner,
                             judge=resolved_judge,
                             auth_mode=auth_mode,
+                            reasoning=config.reasoning,
                             on_step=on_step,
                             on_attempt_done=mark_done,
                             sink=sink,

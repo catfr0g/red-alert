@@ -30,13 +30,21 @@ def run_attack(
     planner: PayloadPlanner,
     judge: AttackJudge,
     auth_mode: str = "vulnerable",
+    reasoning: bool = False,
     isolation: str = ISOLATION_ON,
     on_step: OnStep | None = None,
     on_attempt_done: Callable[[AttemptResult], None] | None = None,
     sink: TraceSink | None = None,
     secrets: Sequence[str] = (),
 ) -> RunReport:
-    stand = InvestStandTarget(target, api_key, victim_api_key, http_client, auth_mode=auth_mode)
+    stand = InvestStandTarget(
+        target,
+        api_key,
+        victim_api_key,
+        http_client,
+        auth_mode=auth_mode,
+        reasoning=reasoning,
+    )
     results: list[AttemptResult] = []
     prior_notes = ""
     for index in range(1, attempts + 1):

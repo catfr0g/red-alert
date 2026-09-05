@@ -211,6 +211,7 @@ def test_payload_request_contains_expected_fields() -> None:
     ]
     first = chats[0]
     assert first["auth_mode"] == "vulnerable"
+    assert first["reasoning"] is False
     assert first["messages"][0]["role"] == "user"
     assert TARGET_TICKER in first["messages"][0]["content"]
     assert first["session_id"].startswith("ra-a-")

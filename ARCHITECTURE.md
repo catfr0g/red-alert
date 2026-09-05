@@ -61,7 +61,7 @@ flowchart TD
 - `planner` — OpenAI-совместимый чат для генерации payload. Использует `MODEL_ATTACK` и `OPENAI_BASE_URL_ATTACK`; ключ только в заголовке `Authorization`.
 - `judge` — независимый OpenAI-совместимый LLM-судья на `MODEL_JUDGE` и `OPENAI_BASE_URL_JUDGE`. Pydantic AI запрашивает структурированный `JudgeVerdict` и строго валидирует поле `success` как `bool` по `success_check` из YAML.
 - `target` — протокол цели: `chat`, `persist`, `isolate`.
-- `stand_client` — инвест-адаптер: чат, persist (`/v1/sessions/{id}/finalize`), isolate (`/v1/memory/reset`). В чат кладёт `auth_mode` из `--auth-mode` / `RED_ALERT_AUTH_MODE`. Ключ только в заголовке `Authorization`.
+- `stand_client` — инвест-адаптер: чат, persist (`/v1/sessions/{id}/finalize`), isolate (`/v1/memory/reset`). В чат кладёт `auth_mode` и `reasoning` из CLI. Ключ только в заголовке `Authorization`.
 - `attacks` — загрузка YAML: цель, примеры, триггер, `success_check`, `flow` memory или probe.
 - `graph` — одна попытка как LangGraph: `adapt`, `inject`, `judge`; для memory ещё `persist` и `trigger`. Isolate в граф не входит.
 - `runner` — isolate до каждой попытки (если `on`), цикл попыток, ASR и заметки для следующей попытки.

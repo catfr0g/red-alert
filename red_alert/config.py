@@ -39,6 +39,7 @@ class AppConfig:
     attacks_dir: Path
     auth_modes: tuple[str, ...]
     isolation: str = DEFAULT_ISOLATION
+    reasoning: bool = False
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -115,6 +116,7 @@ def resolve_config(
     debug: bool = False,
     attacks_dir: str | None = None,
     auth_mode: str | None = None,
+    reasoning: bool = False,
     isolation: str | None = None,
 ) -> AppConfig:
     resolved_key = api_key or environ.get("RED_ALERT_API_KEY")
@@ -194,6 +196,7 @@ def resolve_config(
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
         auth_modes=resolve_auth_modes(auth_mode or environ.get("RED_ALERT_AUTH_MODE")),
+        reasoning=reasoning,
         isolation=resolve_isolation(
             isolation if isolation is not None else environ.get("RED_ALERT_ISOLATE")
         ),

@@ -18,9 +18,11 @@ class StandClient:
         client: httpx.Client,
         *,
         auth_mode: str = DEFAULT_AUTH_MODE,
+        reasoning: bool = False,
     ) -> None:
         self.target = target.rstrip("/")
         self.auth_mode = auth_mode
+        self.reasoning = reasoning
         self._client = client
         self._headers = {
             "Authorization": f"Bearer {api_key}",
@@ -42,6 +44,7 @@ class StandClient:
             "messages": [{"role": "user", "content": user_content}],
             "session_id": session_id,
             "auth_mode": self.auth_mode,
+            "reasoning": self.reasoning,
         }
         response = self._client.post(url, json=body, headers=self._headers)
         return body, response
@@ -66,10 +69,23 @@ class InvestStandTarget:
         client: httpx.Client,
         *,
         auth_mode: str = DEFAULT_AUTH_MODE,
+        reasoning: bool = False,
     ) -> None:
         self._clients = {
-            PRINCIPAL_ATTACKER: StandClient(target, attacker_key, client, auth_mode=auth_mode),
-            PRINCIPAL_VICTIM: StandClient(target, victim_key, client, auth_mode=auth_mode),
+            PRINCIPAL_ATTACKER: StandClient(
+                target,
+                attacker_key,
+                client,
+                auth_mode=auth_mode,
+                reasoning=reasoning,
+            ),
+            PRINCIPAL_VICTIM: StandClient(
+                target,
+                victim_key,
+                client,
+                auth_mode=auth_mode,
+                reasoning=reasoning,
+            ),
         }
 
     def _client(self, principal: str) -> StandClient:
