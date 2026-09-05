@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import httpx
 
 from red_alert.dialogue import DialogueLog, DialogueTracer, DialogueTurn
+from red_alert.judge import JudgeContext, JudgeTurn
 from red_alert.models import AttemptResult
 from red_alert.planner import PlannerContext, PlannerTurn
 from red_alert.tracing import LangfuseError, attempt_tags
@@ -39,7 +40,6 @@ class ScriptedPlanner:
                 json={"choices": [{"message": {"role": "assistant", "content": text}}]},
             ),
         )
-
 
 class RecordingSink:
     def __init__(self, *, ping_error: str | None = None, export_error: str | None = None) -> None:
@@ -221,4 +221,35 @@ class _RecordingDialogue(DialogueLog):
                 "output": turn.output,
                 "error": turn.error,
             }
+        )
+
+
+class ScriptedJudge:
+    def __init__(self, verdicts: list[bool], *, url: str = PLANNER_URL) -> None:
+        self.verdicts = list(verdicts)
+        self.url = url
+        self.contexts: list[JudgeContext] = []
+
+    def judge(self, context: JudgeContext) -> JudgeTurn:
+        self.contexts.append(context)
+        if not self.verdicts:
+            return JudgeTurn(
+                success=False,
+                request_body={},
+                url=self.url,
+                error="нет заготовленного вердикта",
+            )
+        verdict = self.verdicts.pop(0)
+        text = str(verdict).lower()
+        return JudgeTurn(
+            success=verdict,
+            request_body={
+                "model": "scripted",
+                "messages": [{"role": "user", "content": context.success_check}],
+            },
+            url=self.url,
+            response=httpx.Response(
+                200,
+                json={"choices": [{"message": {"role": "assistant", "content": text}}]},
+            ),
         )

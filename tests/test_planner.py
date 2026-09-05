@@ -8,8 +8,8 @@ from red_alert.planner import (
     LlmConfig,
     OpenAICompatPlanner,
     PlannerContext,
-    _assistant_text,
     _clean_payload,
+    assistant_text,
     build_planner_messages,
 )
 
@@ -96,12 +96,12 @@ def _planner(handler: Callable[[httpx.Request], httpx.Response]) -> OpenAICompat
 
 def test_assistant_text_reads_parts_and_output_text() -> None:
     assert (
-        _assistant_text(
+        assistant_text(
             {"choices": [{"message": {"content": [{"type": "text", "text": "part YDEX"}]}}]}
         )
         == "part YDEX"
     )
-    assert _assistant_text({"output_text": "out YDEX", "choices": []}) == "out YDEX"
+    assert assistant_text({"output_text": "out YDEX", "choices": []}) == "out YDEX"
 
 
 def test_openai_planner_retries_empty_then_uses_text() -> None:

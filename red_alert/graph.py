@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 
 from red_alert.attacks import AttackScenario
 from red_alert.dialogue import DialogueTracer, NullDialogue, persist_view
+from red_alert.judge import AttackJudge, JudgeContext
 from red_alert.models import AttackStep, AttemptResult
 from red_alert.planner import PayloadPlanner, PlannerContext, build_planner_messages
 from red_alert.target import PRINCIPAL_ATTACKER, PRINCIPAL_VICTIM, Target, TargetTurn
@@ -16,6 +17,7 @@ OnStep = Callable[[AttackStep], None]
 ACTOR_ATTACKER = PRINCIPAL_ATTACKER
 ACTOR_VICTIM = PRINCIPAL_VICTIM
 ACTOR_PLANNER = "planner"
+ACTOR_JUDGE = "judge"
 
 
 @dataclass
@@ -147,6 +149,7 @@ def build_attempt_graph(
     target: Target,
     scenario: AttackScenario,
     planner: PayloadPlanner,
+    judge: AttackJudge,
     on_step: OnStep | None = None,
     dialogue: DialogueTracer | None = None,
 ):
@@ -208,9 +211,6 @@ def build_attempt_graph(
         log.add_message("assistant", assistant)
         if error or scenario.flow == "probe":
             log.end_dialogue()
-        success = False
-        if scenario.flow == "probe" and not error:
-            success = scenario.is_success(assistant)
         return {
             "session_a": session_a,
             "injects": state.injects + 1,
@@ -218,7 +218,7 @@ def build_attempt_graph(
             "steps": steps,
             "error": error,
             "usable_policy": False,
-            "success": success,
+            "success": False,
         }
 
     def persist(state: AttemptState) -> dict:
@@ -272,7 +272,44 @@ def build_attempt_graph(
         return {
             "steps": steps,
             "error": None,
-            "success": scenario.is_success(assistant),
+            "last_assistant": assistant,
+            "success": False,
+        }
+
+    def judge_result(state: AttemptState) -> dict:
+        steps = list(state.steps)
+        turn = judge.judge(
+            JudgeContext(
+                success_check=scenario.success_check,
+                agent_response=state.last_assistant,
+            )
+        )
+        if turn.response is None:
+            step = _error_step(
+                name="judge",
+                method="POST",
+                url=turn.url,
+                actor=ACTOR_JUDGE,
+                request_body=turn.request_body,
+                error=turn.error or "ошибка судьи",
+            )
+        else:
+            step = _http_step(
+                name="judge",
+                method="POST",
+                url=turn.url,
+                actor=ACTOR_JUDGE,
+                request_body=turn.request_body,
+                response=turn.response,
+            )
+            if turn.error:
+                step = step.model_copy(update={"error": turn.error})
+        steps.append(step)
+        _emit(on_step, step)
+        return {
+            "steps": steps,
+            "error": turn.error,
+            "success": turn.success if turn.error is None else False,
         }
 
     def after_adapt(state: AttemptState) -> str:
@@ -283,9 +320,7 @@ def build_attempt_graph(
             return END
         if scenario.flow != "probe":
             return "persist"
-        if state.success or state.injects >= scenario.max_injects:
-            return END
-        return "adapt"
+        return "judge"
 
     def after_persist(state: AttemptState) -> str:
         if state.error:
@@ -294,16 +329,25 @@ def build_attempt_graph(
             return "trigger"
         return "adapt"
 
+    def after_judge(state: AttemptState) -> str:
+        if state.error or scenario.flow == "memory":
+            return END
+        if state.success or state.injects >= scenario.max_injects:
+            return END
+        return "adapt"
+
     graph = StateGraph(AttemptState)
     graph.add_node("adapt", adapt)
     graph.add_node("inject", inject)
     graph.add_node("persist", persist)
     graph.add_node("trigger", trigger)
+    graph.add_node("judge", judge_result)
     graph.add_edge(START, "adapt")
     graph.add_conditional_edges("adapt", after_adapt)
     graph.add_conditional_edges("inject", after_inject)
     graph.add_conditional_edges("persist", after_persist)
-    graph.add_edge("trigger", END)
+    graph.add_edge("trigger", "judge")
+    graph.add_conditional_edges("judge", after_judge)
     return graph.compile()
 
 
@@ -312,6 +356,7 @@ def run_attempt(
     scenario: AttackScenario,
     attempt_index: int,
     planner: PayloadPlanner,
+    judge: AttackJudge,
     on_step: OnStep | None = None,
     prior_notes: str = "",
     invoke_config: dict | None = None,
@@ -319,7 +364,7 @@ def run_attempt(
     dialogue: DialogueTracer | None = None,
     prefix_steps: list[AttackStep] | None = None,
 ) -> AttemptResult:
-    graph = build_attempt_graph(target, scenario, planner, on_step, dialogue)
+    graph = build_attempt_graph(target, scenario, planner, judge, on_step, dialogue)
     initial = {
         "attempt_index": attempt_index,
         "session_a": "",

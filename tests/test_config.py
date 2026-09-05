@@ -15,7 +15,8 @@ from red_alert.config import (
 
 LLM_ENV = {
     "OPENAI_API_KEY": "sk-planner",
-    "MODEL": "openai/gpt-5-mini",
+    "MODEL_ATTACK": "openai/gpt-5-mini",
+    "MODEL_JUDGE": "openai/gpt-5.4-mini",
 }
 
 
@@ -55,9 +56,11 @@ def test_resolve_config_accepts_full_chat_url() -> None:
         environ=LLM_ENV,
     )
     assert config.target == "http://localhost:8600"
-    assert config.openai_base_url == DEFAULT_OPENAI_BASE_URL
+    assert config.attack_openai_base_url == DEFAULT_OPENAI_BASE_URL
+    assert config.judge_openai_base_url == DEFAULT_OPENAI_BASE_URL
     assert config.max_tokens == DEFAULT_MAX_TOKENS
-    assert config.model == "openai/gpt-5-mini"
+    assert config.attack_model == "openai/gpt-5-mini"
+    assert config.judge_model == "openai/gpt-5.4-mini"
     assert config.debug is False
     assert config.attacks_dir.name == "attacks"
     assert config.auth_modes == ("vulnerable",)
@@ -73,11 +76,13 @@ def test_resolve_config_reads_llm_overrides() -> None:
         attempts=1,
         environ={
             **LLM_ENV,
-            "OPENAI_BASE_URL": "https://example.test/v1/chat/completions",
+            "OPENAI_BASE_URL_ATTACK": "https://attack.test/v1/chat/completions",
+            "OPENAI_BASE_URL_JUDGE": "https://judge.test/api/v1/chat/completions",
             "MAX_TOKENS": "512",
         },
     )
-    assert config.openai_base_url == "https://example.test/v1"
+    assert config.attack_openai_base_url == "https://attack.test/v1"
+    assert config.judge_openai_base_url == "https://judge.test/api/v1"
     assert config.max_tokens == 512
 
 

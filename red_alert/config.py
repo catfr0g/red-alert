@@ -30,8 +30,10 @@ class AppConfig:
     scenario: str | None
     attempts: int
     openai_api_key: str
-    openai_base_url: str
-    model: str
+    attack_openai_base_url: str
+    judge_openai_base_url: str
+    attack_model: str
+    judge_model: str
     max_tokens: int
     debug: bool
     attacks_dir: Path
@@ -136,9 +138,12 @@ def resolve_config(
     openai_api_key = environ.get("OPENAI_API_KEY")
     if not openai_api_key:
         raise UsageError("Нужна переменная OPENAI_API_KEY")
-    model = environ.get("MODEL")
-    if not model:
-        raise UsageError("Нужна переменная MODEL")
+    attack_model = environ.get("MODEL_ATTACK")
+    if not attack_model:
+        raise UsageError("Нужна переменная MODEL_ATTACK")
+    judge_model = environ.get("MODEL_JUDGE")
+    if not judge_model:
+        raise UsageError("Нужна переменная MODEL_JUDGE")
 
     raw_tokens = environ.get("MAX_TOKENS", str(DEFAULT_MAX_TOKENS))
     try:
@@ -148,7 +153,12 @@ def resolve_config(
     if max_tokens < 1:
         raise UsageError("MAX_TOKENS должен быть целым числом >= 1")
 
-    openai_base_url = normalize_llm_base(environ.get("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL)
+    attack_openai_base_url = normalize_llm_base(
+        environ.get("OPENAI_BASE_URL_ATTACK") or DEFAULT_OPENAI_BASE_URL
+    )
+    judge_openai_base_url = normalize_llm_base(
+        environ.get("OPENAI_BASE_URL_JUDGE") or DEFAULT_OPENAI_BASE_URL
+    )
 
     raw_dir = attacks_dir or environ.get("RED_ALERT_ATTACKS_DIR")
     if raw_dir:
@@ -176,8 +186,10 @@ def resolve_config(
         scenario=scenario or None,
         attempts=attempts,
         openai_api_key=openai_api_key,
-        openai_base_url=openai_base_url,
-        model=model,
+        attack_openai_base_url=attack_openai_base_url,
+        judge_openai_base_url=judge_openai_base_url,
+        attack_model=attack_model,
+        judge_model=judge_model,
         max_tokens=max_tokens,
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
