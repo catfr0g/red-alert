@@ -33,8 +33,11 @@ class TargetTurn:
         self.error = error
 
 
+UserContent = str | list
+
+
 class Target(Protocol):
-    def chat(self, *, principal: str, session_id: str, user_content: str) -> TargetTurn: ...
+    def chat(self, *, principal: str, session_id: str, user_content: UserContent) -> TargetTurn: ...
 
     def persist(self, *, principal: str, session_id: str) -> TargetTurn: ...
 

@@ -4,6 +4,7 @@ from red_alert.target import (
     PRINCIPAL_ATTACKER,
     PRINCIPAL_VICTIM,
     TargetTurn,
+    UserContent,
     isolate_error,
 )
 
@@ -38,7 +39,7 @@ class StandClient:
     def isolate_url(self) -> str:
         return f"{self.target}/v1/memory/reset"
 
-    def chat(self, *, session_id: str, user_content: str) -> tuple[dict, httpx.Response]:
+    def chat(self, *, session_id: str, user_content: UserContent) -> tuple[dict, httpx.Response]:
         url = self.chat_url()
         body = {
             "messages": [{"role": "user", "content": user_content}],
@@ -91,7 +92,7 @@ class InvestStandTarget:
     def _client(self, principal: str) -> StandClient:
         return self._clients[principal]
 
-    def chat(self, *, principal: str, session_id: str, user_content: str) -> TargetTurn:
+    def chat(self, *, principal: str, session_id: str, user_content: UserContent) -> TargetTurn:
         client = self._client(principal)
         try:
             body, response = client.chat(session_id=session_id, user_content=user_content)

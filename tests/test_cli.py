@@ -393,26 +393,30 @@ def test_default_runs_all_catalog_attacks(
     assert names == [
         "base64-injection",
         "cross-user-portfolio",
+        "cross-user-portfolio-image-injection",
         "memory-poisoning",
+        "memory-poisoning-image-injection",
         "memory-poisoning-peer-exfil",
         "memory-poisoning-ryan-gosling-bladerunner-speech",
         "memory-poisoning-sleeper",
         "system-prompt-leakage",
     ]
-    assert payload["total"] == 7
+    assert payload["total"] == 9
     assert payload["asr"] == 1.0
     assert "base64-injection" in output
     assert "cross-user-portfolio" in output
+    assert "cross-user-portfolio-image-injection" in output
     assert "memory-poisoning" in output
+    assert "memory-poisoning-image-injection" in output
     assert "memory-poisoning-peer-exfil" in output
     assert "memory-poisoning-ryan-gosling-bladerunner-speech" in output
     assert "memory-poisoning-sleeper" in output
     assert "system-prompt-leakage" in output
     assert "Все сценарии" in output
     probe_steps = [step["name"] for step in payload["runs"][0]["traces"][0]["steps"]]
-    memory_steps = [step["name"] for step in payload["runs"][2]["traces"][0]["steps"]]
-    exfil_steps = [step["name"] for step in payload["runs"][3]["traces"][0]["steps"]]
-    sleeper_steps = [step["name"] for step in payload["runs"][5]["traces"][0]["steps"]]
+    memory_steps = [step["name"] for step in payload["runs"][3]["traces"][0]["steps"]]
+    exfil_steps = [step["name"] for step in payload["runs"][5]["traces"][0]["steps"]]
+    sleeper_steps = [step["name"] for step in payload["runs"][7]["traces"][0]["steps"]]
     assert "persist" not in probe_steps
     assert probe_steps == ["isolate", "adapt", "payload", "judge"]
     assert memory_steps == ["isolate", "adapt", "payload", "persist", "trigger", "judge"]
