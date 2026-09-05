@@ -7,3 +7,4 @@ __pycache__/
 attack.log
 judge.log
 attack-report.json
+attack_artifacts/

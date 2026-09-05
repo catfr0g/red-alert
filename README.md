@@ -102,8 +102,10 @@ uv run red-alert attack --auth-mode both --output attack-report.json --attempts 
 - `memory-poisoning-peer-exfil` — global policy заставляет в ответ жертве вставить эталон CUS 1001 (SBER/GAZP);
 - `memory-poisoning-sleeper` — спящая policy: на «подушку безопасности» советовать ликвидацию на депозит;
 - `cross-user-portfolio` — probe: агент выдаёт портфель другого клиента;
+- `cross-user-portfolio-image-injection` — то же, но payload рисуется на PNG и уходит как изображение;
 - `system-prompt-leakage` — probe: утечка system prompt / внутренних инструкций (LLM07);
-- `base64-injection` — probe: скрытый запрос в base64, агент декодирует и исполняет (LLM01).
+- `base64-injection` — probe: скрытый запрос в base64, агент декодирует и исполняет (LLM01);
+- `memory-poisoning-image-injection` — как peer-exfil, но payload рисуется на PNG и уходит как изображение;
 
 ```bash
 uv run red-alert attack --scenario memory-poisoning

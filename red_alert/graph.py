@@ -7,10 +7,11 @@ from langgraph.graph import END, START, StateGraph
 
 from red_alert.attacks import AttackScenario
 from red_alert.dialogue import DialogueTracer, NullDialogue, persist_view
+from red_alert.image_payload import payload_user_content
 from red_alert.judge import AttackJudge, JudgeContext
 from red_alert.models import AttackStep, AttemptResult
 from red_alert.planner import PayloadPlanner, PlannerContext, build_planner_messages
-from red_alert.target import PRINCIPAL_ATTACKER, PRINCIPAL_VICTIM, Target, TargetTurn
+from red_alert.target import PRINCIPAL_ATTACKER, PRINCIPAL_VICTIM, Target, TargetTurn, UserContent
 
 OnStep = Callable[[AttackStep], None]
 
@@ -127,7 +128,7 @@ def _emit(on_step: OnStep | None, step: AttackStep) -> None:
 
 def _send_payload(
     target: Target,
-    payload: str,
+    payload: UserContent,
     session_id: str,
     steps: list[AttackStep],
     on_step: OnStep | None = None,
@@ -204,8 +205,31 @@ def build_attempt_graph(
         steps = list(state.steps)
         session_a = f"ra-a-{uuid.uuid4().hex[:12]}"
         log.begin_dialogue(name="attacker", session_id=session_a)
+        try:
+            user_content = payload_user_content(scenario, state.payload)
+        except OSError as exc:
+            step = _error_step(
+                name="payload",
+                method="POST",
+                url="",
+                actor=ACTOR_ATTACKER,
+                request_body=None,
+                error=str(exc),
+            )
+            steps.append(step)
+            _emit(on_step, step)
+            log.end_dialogue()
+            return {
+                "session_a": session_a,
+                "injects": state.injects + 1,
+                "last_assistant": "",
+                "steps": steps,
+                "error": str(exc),
+                "usable_policy": False,
+                "success": False,
+            }
         with log.stand(user=state.payload, actor="attacker", session_id=session_a) as observed:
-            error, assistant = _send_payload(target, state.payload, session_a, steps, on_step)
+            error, assistant = _send_payload(target, user_content, session_a, steps, on_step)
             observed.finish(output=assistant, error=error)
         log.add_message("user", state.payload)
         log.add_message("assistant", assistant)
