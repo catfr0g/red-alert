@@ -25,6 +25,12 @@ from red_alert.profile import (
     default_profile_path,
     load_profile,
 )
+from red_alert.usage import (
+    CODEX_MISSING_HINT,
+    UsageRecord,
+    parse_codex_jsonl,
+    parse_openai_usage,
+)
 
 SKIP_DIRS = {
     ".git",
@@ -94,6 +100,7 @@ class SourceAnalyzer(Protocol):
 class FakeAnalyzer:
     def __init__(self, profile: StandProfile) -> None:
         self.profile = profile
+        self.usage: UsageRecord | None = None
 
     def analyze(self, path: Path) -> StandProfile:
         return self.profile.model_copy(update={"source": str(path)})
@@ -140,6 +147,9 @@ def _seed_known_bindings(blob: str) -> dict:
 
 
 class HeuristicAnalyzer:
+    def __init__(self) -> None:
+        self.usage: UsageRecord | None = None
+
     def analyze(self, path: Path) -> StandProfile:
         chunks: list[str] = [path.name]
         for file_path in _iter_source_files(path)[:400]:
@@ -302,6 +312,7 @@ class LlmAnalyzer:
     def __init__(self, config: LlmConfig, client: httpx.Client) -> None:
         self.config = config
         self._client = client
+        self.usage: UsageRecord | None = None
 
     def analyze(self, path: Path) -> StandProfile:
         packed = _pack_sources(path)
@@ -336,10 +347,17 @@ class LlmAnalyzer:
         text = assistant_text(body).strip()
         if not text:
             raise AnalyzerError("пустой ответ анализатора")
+        prompt_tokens, completion_tokens = parse_openai_usage(body)
+        self.usage = UsageRecord(role="inspect", model=self.config.model).plus_tokens(
+            prompt_tokens, completion_tokens
+        )
         return _parse_profile_payload(text, str(path))
 
 
 class CodexHarnessAnalyzer:
+    def __init__(self) -> None:
+        self.usage: UsageRecord | None = None
+
     def analyze(self, path: Path) -> StandProfile:
         prompt = build_analyzer_prompt(path)
         schema_path: Path | None = None
@@ -365,6 +383,7 @@ class CodexHarnessAnalyzer:
                     str(last_path.parent if last_path is not None else schema_path.parent),
                     "--color",
                     "never",
+                    "--json",
                     "--output-schema",
                     str(schema_path),
                     "--output-last-message",
@@ -382,7 +401,7 @@ class CodexHarnessAnalyzer:
         except FileNotFoundError as exc:
             if last_path is not None:
                 last_path.unlink(missing_ok=True)
-            raise AnalyzerError("Codex CLI не найден (команда codex)") from exc
+            raise AnalyzerError(CODEX_MISSING_HINT) from exc
         except subprocess.TimeoutExpired as exc:
             if last_path is not None:
                 last_path.unlink(missing_ok=True)
@@ -397,9 +416,10 @@ class CodexHarnessAnalyzer:
             last_text = (
                 last_path.read_text(encoding="utf-8") if last_path and last_path.is_file() else ""
             )
-            text = last_text.strip() or (result.stdout or "").strip()
+            text = last_text.strip()
             if not text:
                 raise AnalyzerError("Codex CLI вернул пустой ответ")
+            self.usage = parse_codex_jsonl(result.stdout or "")
             return _parse_profile_payload(text, str(path))
         finally:
             if last_path is not None:
@@ -412,9 +432,7 @@ def resolve_analyzer_name(
 ) -> str:
     if raw:
         return raw
-    if environ.get("OPENAI_API_KEY") and environ.get("MODEL_ATTACK"):
-        return "llm"
-    return "heuristic"
+    return "harness"
 
 
 def build_analyzer(

@@ -65,7 +65,8 @@ make keys
 | Reasoning | `--reasoning` | Передавать `reasoning: true` во все chat-запросы к стенду; по умолчанию `false` |
 | Изоляция | `--isolate` / `RED_ALERT_ISOLATE` | `on` (по умолчанию) или `off`. `on` сбрасывает память стенда до каждой попытки |
 | Попытки | `--attempts` | Число прогонов для ASR |
-| Отчёт | `--output` / `-o` | JSON с трейсами успешных атак (UTF-8) |
+| Отчёт | `--output` / `-o` | JSON с трейсами успешных атак и usage своих LLM (UTF-8) |
+| Inspect | `--analyzer` | `harness` (Codex, по умолчанию), `llm` или `heuristic` |
 | Debug | `--debug` / `RED_ALERT_DEBUG` | Полный лог шагов на stderr; в JSON все попытки |
 | Langfuse | `RED_ALERT_LANGFUSE` | `1` / `true` / `yes` / `on` — писать все попытки в Langfuse |
 | Langfuse | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Ключи проекта (обязательны, если экспорт включён) |
@@ -77,7 +78,7 @@ make keys
 uv run red-alert inspect ../genai-invest-agent-memory-stand --output stand-profile.yaml
 ```
 
-`inspect` не ходит на живой стенд и не требует ключей стенда. `--analyzer heuristic` только читает файлы; если репозиторий похож на инвест-стенд, подставляет слоты из `invest-stand`. `llm` и `harness` получают каталог техник и должны заполнить слоты из исходников. Без флага при наличии `OPENAI_API_KEY` и `MODEL_ATTACK` используется `llm`. `harness` вызывает Codex CLI. Затем:
+`inspect` не ходит на живой стенд и не требует ключей стенда. Без `--analyzer` вызывается Codex (`harness`). Если команды `codex` нет — код 1 и подсказка взять `--analyzer llm` или `--analyzer heuristic`. `heuristic` только читает файлы; если репозиторий похож на инвест-стенд, подставляет слоты из `invest-stand`. `llm` и `harness` получают каталог техник и должны заполнить слоты из исходников. Планировщик и судья могут быть OpenRouter или свой vLLM: usage читается из стандартных `prompt_tokens` / `completion_tokens`. Затем:
 
 ```bash
 uv run red-alert attack --profile stand-profile.yaml --output attack-report.json
@@ -92,6 +93,14 @@ make attack ARGS='--output attack-report.json --attempts 3'
 ```
 
 То же самое: `uv run red-alert attack --output attack-report.json --attempts 3`.
+
+Сумма входных и выходных токенов по JSON-отчётам:
+
+```bash
+uv run python script/sum_attack_usage.py attack-report.json
+```
+
+Можно передать несколько файлов — скрипт сложит `usage` по ролям и моделям и напечатает итог `in` / `out`.
 
 Без `--scenario` CLI проходит все YAML в `attacks/` по алфавиту. `--attempts` — число попыток **каждого** сценария. В баре видно текущее имя и режим стенда.
 

@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from red_alert.usage import UsageRecord
+
 
 class AttackStep(BaseModel):
     name: str
@@ -18,6 +20,7 @@ class AttemptResult(BaseModel):
     session_a: str
     session_b: str
     steps: list[AttackStep] = Field(default_factory=list)
+    usage: list[UsageRecord] = Field(default_factory=list)
 
 
 class RunReport(BaseModel):
@@ -26,6 +29,7 @@ class RunReport(BaseModel):
     auth_mode: str = "vulnerable"
     isolation: str = "on"
     attempts: list[AttemptResult] = Field(default_factory=list)
+    usage: list[UsageRecord] = Field(default_factory=list)
 
     @property
     def successful_count(self) -> int:

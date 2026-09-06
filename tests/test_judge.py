@@ -61,6 +61,9 @@ def test_pydantic_ai_judge_returns_typed_true() -> None:
     assert turn.request_body["output_schema"]["properties"]["success"]["type"] == "boolean"
     assert turn.response is not None
     assert turn.response.json() == {"output": {"success": True}}
+    assert turn.usage is not None
+    assert turn.usage.role == "judge"
+    assert turn.usage.model == "qwen3.5-4b"
 
 
 def test_pydantic_ai_judge_rejects_string_bool() -> None:

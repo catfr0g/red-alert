@@ -7,11 +7,12 @@ from red_alert.dialogue import DialogueTracer, NullDialogue
 from red_alert.graph import ACTOR_ATTACKER, OnStep, run_attempt, step_from_turn
 from red_alert.judge import AttackJudge
 from red_alert.models import AttackStep, AttemptResult, RunReport
-from red_alert.planner import PayloadPlanner
 from red_alert.openclaw_client import DEFAULT_OPENCLAW_MODEL, OpenClawTarget
+from red_alert.planner import PayloadPlanner
 from red_alert.stand_client import InvestStandTarget
 from red_alert.target import IsolateError, Target
 from red_alert.tracing import TraceSink
+from red_alert.usage import merge_usage
 
 __all__ = ["run_attempt", "run_attack"]
 
@@ -104,6 +105,7 @@ def run_attack(
         auth_mode=auth_mode,
         isolation=isolation,
         attempts=results,
+        usage=merge_usage([item for result in results for item in result.usage]),
     )
 
 

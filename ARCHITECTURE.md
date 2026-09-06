@@ -61,8 +61,9 @@ flowchart TD
 
 - `cli` — `attack` и `inspect`, таймаут HTTP 180 с. `attack` без `--scenario` собирает шаблоны через профиль; печать отчёта и `--output` в UTF-8. `inspect` пишет StandProfile из исходников.
 - `profile` — StandProfile, слоты, отсечение `absent`+high.
-- `analyzer` — heuristic / llm / Codex harness; в тестах фейк.
+- `analyzer` — default Codex harness; явно `llm` или `heuristic`; в тестах фейк. Пишет input/output токены роли `inspect`.
 - `script/fetch_stand_keys.py` — не часть `red-alert attack`: password grant в Keycloak, `POST /keys`, upsert `.env`.
+- `script/sum_attack_usage.py` — сумма input/output токенов из JSON-отчётов атаки.
 - `install.sh` / `install.ps1` — пользовательская установка: при необходимости скачивают CPython 3.14, затем `venv`, `pip install -r requirements.txt`, `.env` из примера, команда `red-alert` в `~/.local/bin`. Без uv и pre-commit.
 - `config` — `.env` + окружение + флаги. Нормализует target, `OPENAI_BASE_URL_ATTACK` и `OPENAI_BASE_URL_JUDGE`.
 - `planner` — OpenAI-совместимый чат для генерации payload. Использует `MODEL_ATTACK` и `OPENAI_BASE_URL_ATTACK`; ключ только в заголовке `Authorization`.
@@ -73,8 +74,8 @@ flowchart TD
 - `graph` — одна попытка как LangGraph: `adapt`, `inject`, `judge`; для memory ещё `persist` и `trigger`. Isolate в граф не входит.
 - `runner` — isolate до каждой попытки (если `on`), цикл попыток, ASR и заметки для следующей попытки.
 - `display` — цветной итог и прогресс шагов (`rich`).
-- `models` / `report` — краткий итог и JSON-трейсы успешных попыток. Ключи заменяются на `***`.
-- `tracing` — опциональная живая запись попытки в Langfuse: диалоги планировщик/стенд/жертва, не dump state графа. Каждая попытка — отдельный корневой span; isolate и граф пишутся в тот же trace. Если включён и Langfuse недоступен, прогон останавливается.
+- `models` / `report` — краткий итог и JSON-трейсы успешных попыток плюс `usage` планировщика и судьи (роль + модель + input/output). Ключи заменяются на `***`.
+- `tracing` — опциональная живая запись попытки в Langfuse: диалоги планировщик/стенд/жертва, usage на generation planner/judge, не dump state графа. Каждая попытка — отдельный корневой span; isolate и граф пишутся в тот же trace. Если включён и Langfuse недоступен, прогон останавливается.
 
 ## Поток одной попытки
 

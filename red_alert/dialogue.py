@@ -11,6 +11,8 @@ class DialogueTurn:
         self.output: object | None = None
         self.error: str | None = None
         self.model: str | None = None
+        self.input_tokens: int | None = None
+        self.output_tokens: int | None = None
 
     def finish(
         self,
@@ -18,10 +20,14 @@ class DialogueTurn:
         output: object | None = None,
         error: str | None = None,
         model: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> None:
         self.output = output
         self.error = error
         self.model = model
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
 
 
 class DialogueTracer(Protocol):
@@ -36,6 +42,10 @@ class DialogueTracer(Protocol):
     def set_persist(self, body: object) -> None: ...
 
     def planner(
+        self, *, messages: list[dict], model: str | None = None
+    ) -> AbstractContextManager[DialogueTurn]: ...
+
+    def judge(
         self, *, messages: list[dict], model: str | None = None
     ) -> AbstractContextManager[DialogueTurn]: ...
 
@@ -76,6 +86,10 @@ class DialogueLog:
 class NullDialogue(DialogueLog):
     @contextmanager
     def planner(self, *, messages: list[dict], model: str | None = None) -> Iterator[DialogueTurn]:
+        yield DialogueTurn()
+
+    @contextmanager
+    def judge(self, *, messages: list[dict], model: str | None = None) -> Iterator[DialogueTurn]:
         yield DialogueTurn()
 
     @contextmanager

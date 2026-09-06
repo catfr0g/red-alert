@@ -3,6 +3,7 @@ from collections.abc import Sequence
 
 from red_alert.models import AttemptResult, RunReport
 from red_alert.profile import SkippedScenario
+from red_alert.usage import UsageRecord, format_usage_lines, merge_usage, usage_payload
 
 
 def mask_secrets(text: str, secrets: Sequence[str]) -> str:
@@ -28,6 +29,7 @@ def format_summary(report: RunReport) -> str:
         if extra:
             line = f"{line}  {extra}"
         lines.append(line)
+    lines.extend(format_usage_lines(report.usage))
     return "\n".join(lines)
 
 
@@ -44,6 +46,7 @@ def report_payload(report: RunReport, *, include_failed: bool = False) -> dict:
         "successful": report.successful_count,
         "total": report.total_count,
         "asr": report.asr,
+        "usage": usage_payload(report.usage),
         "traces": [
             {
                 "attempt_index": attempt.attempt_index,
@@ -79,11 +82,13 @@ def format_json_reports(
         return mask_secrets(json.dumps(payload, ensure_ascii=False, indent=2, default=str), secrets)
     successful = sum(item.successful_count for item in reports)
     total = sum(item.total_count for item in reports)
+    combined: list[UsageRecord] = merge_usage([item for report in reports for item in report.usage])
     payload = {
         "target": reports[0].target if reports else "",
         "successful": successful,
         "total": total,
         "asr": successful / total if total else 0.0,
+        "usage": usage_payload(combined),
         "skipped": skipped_payload,
         "runs": [report_payload(item, include_failed=include_failed) for item in reports],
     }

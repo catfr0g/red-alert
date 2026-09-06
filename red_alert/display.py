@@ -17,6 +17,7 @@ from rich.text import Text
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.profile import SkippedScenario
 from red_alert.report import mask_secrets
+from red_alert.usage import format_usage_lines, merge_usage
 
 
 class AttackProgress:
@@ -126,6 +127,10 @@ def print_summaries(console: Console, reports: Sequence[RunReport]) -> None:
     table.add_row("scenarios", str(len(reports)))
     table.add_row("successful", f"{successful}/{total}")
     table.add_row(Text("ASR", style=asr_style), Text(asr_percent, style=asr_style))
+    combined = merge_usage([item for report in reports for item in report.usage])
+    for line in format_usage_lines(combined):
+        role, _, rest = line.partition(":")
+        table.add_row(role, rest.strip())
     console.print(table)
     console.print()
     modes = list(dict.fromkeys(item.auth_mode for item in reports))
@@ -153,6 +158,9 @@ def print_summary(console: Console, report: RunReport) -> None:
     table.add_row("target", report.target)
     table.add_row("successful", f"{report.successful_count}/{report.total_count}")
     table.add_row(Text("ASR", style=asr_style), Text(asr_percent, style=asr_style))
+    for line in format_usage_lines(report.usage):
+        role, _, rest = line.partition(":")
+        table.add_row(role, rest.strip())
     console.print(table)
     console.print()
     for attempt in report.attempts:
