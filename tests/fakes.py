@@ -8,6 +8,7 @@ from red_alert.judge import JudgeContext, JudgeTurn
 from red_alert.models import AttemptResult
 from red_alert.planner import PlannerContext, PlannerTurn
 from red_alert.tracing import LangfuseError, attempt_tags
+from red_alert.usage import UsageRecord
 
 PLANNER_URL = "https://planner.test/v1/chat/completions"
 
@@ -20,12 +21,14 @@ class ScriptedPlanner:
 
     def plan(self, context: PlannerContext) -> PlannerTurn:
         self.contexts.append(context)
+        usage = UsageRecord(role="planner", model="scripted")
         if not self.texts:
             return PlannerTurn(
                 payload="",
                 request_body={},
                 url=self.url,
                 error="нет заготовленного payload",
+                usage=usage,
             )
         text = self.texts.pop(0)
         return PlannerTurn(
@@ -39,7 +42,9 @@ class ScriptedPlanner:
                 200,
                 json={"choices": [{"message": {"role": "assistant", "content": text}}]},
             ),
+            usage=usage,
         )
+
 
 class RecordingSink:
     def __init__(self, *, ping_error: str | None = None, export_error: str | None = None) -> None:
@@ -180,6 +185,25 @@ class _RecordingDialogue(DialogueLog):
                 "input": messages,
                 "output": turn.output,
                 "error": turn.error,
+                "model": turn.model,
+                "input_tokens": turn.input_tokens,
+                "output_tokens": turn.output_tokens,
+            }
+        )
+
+    @contextmanager
+    def judge(self, *, messages: list[dict], model: str | None = None):
+        turn = DialogueTurn()
+        yield turn
+        self._sink.dialogue_events.append(
+            {
+                "kind": "judge",
+                "input": messages,
+                "output": turn.output,
+                "error": turn.error,
+                "model": turn.model,
+                "input_tokens": turn.input_tokens,
+                "output_tokens": turn.output_tokens,
             }
         )
 
@@ -232,12 +256,14 @@ class ScriptedJudge:
 
     def judge(self, context: JudgeContext) -> JudgeTurn:
         self.contexts.append(context)
+        usage = UsageRecord(role="judge", model="scripted")
         if not self.verdicts:
             return JudgeTurn(
                 success=False,
                 request_body={},
                 url=self.url,
                 error="нет заготовленного вердикта",
+                usage=usage,
             )
         verdict = self.verdicts.pop(0)
         text = str(verdict).lower()
@@ -252,4 +278,5 @@ class ScriptedJudge:
                 200,
                 json={"choices": [{"message": {"role": "assistant", "content": text}}]},
             ),
+            usage=usage,
         )

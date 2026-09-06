@@ -3,6 +3,7 @@ import json
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.profile import SkippedScenario
 from red_alert.report import format_json_report, format_json_reports, format_report, mask_secrets
+from red_alert.usage import UsageRecord
 
 
 def test_asr_all_success() -> None:
@@ -151,6 +152,8 @@ def test_json_reports_wraps_multiple_runs() -> None:
         "cross-user-portfolio",
         "memory-poisoning",
     ]
+    assert "usage" in payload
+    assert "usage" in payload["runs"][0]
 
 
 def test_json_reports_include_skipped() -> None:
@@ -179,6 +182,30 @@ def test_json_reports_include_skipped() -> None:
     assert "vision" in payload["skipped"][0]["reason"]
 
 
+def test_json_report_includes_usage_by_role() -> None:
+    report = RunReport(
+        scenario="memory-poisoning",
+        target="http://localhost:8600",
+        attempts=[AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1")],
+        usage=[
+            UsageRecord(role="planner", model="vllm/qwen", input_tokens=12, output_tokens=3),
+            UsageRecord(role="judge", model="openai/gpt-5.4-mini", input_tokens=8, output_tokens=2),
+        ],
+    )
+    payload = json.loads(format_json_report(report, secrets=[]))
+    assert payload["usage"]["planner"] == {
+        "model": "vllm/qwen",
+        "input_tokens": 12,
+        "output_tokens": 3,
+    }
+    assert payload["usage"]["judge"]["model"] == "openai/gpt-5.4-mini"
+    assert "cost" not in payload
+    assert "cost" not in payload["usage"]["planner"]
+    text = format_report(report, secrets=[])
+    assert "planner: vllm/qwen  in=12 out=3" in text
+    assert "judge: openai/gpt-5.4-mini  in=8 out=2" in text
+
+
 def test_json_reports_single_keeps_flat_shape() -> None:
     report = RunReport(
         scenario="memory-poisoning",
@@ -190,3 +217,4 @@ def test_json_reports_single_keeps_flat_shape() -> None:
     assert payload["auth_mode"] == "vulnerable"
     assert payload["isolation"] == "on"
     assert "runs" not in payload
+    assert payload["usage"] == {}

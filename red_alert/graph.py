@@ -9,10 +9,11 @@ from langgraph.graph import END, START, StateGraph
 from red_alert.attacks import AttackScenario
 from red_alert.dialogue import DialogueTracer, NullDialogue, persist_view
 from red_alert.image_payload import payload_user_content
-from red_alert.judge import AttackJudge, JudgeContext
+from red_alert.judge import AttackJudge, JudgeContext, JudgeTurn, build_judge_messages
 from red_alert.models import AttackStep, AttemptResult
-from red_alert.planner import PayloadPlanner, PlannerContext, build_planner_messages
+from red_alert.planner import PayloadPlanner, PlannerContext, PlannerTurn, build_planner_messages
 from red_alert.target import PRINCIPAL_ATTACKER, PRINCIPAL_VICTIM, Target, TargetTurn, UserContent
+from red_alert.usage import UsageRecord
 
 OnStep = Callable[[AttackStep], None]
 
@@ -36,6 +37,7 @@ class AttemptState:
     error: str | None = None
     usable_policy: bool = False
     success: bool = False
+    usage: list[UsageRecord] = field(default_factory=list)
 
 
 def _decode_body(response: httpx.Response) -> object:
@@ -132,6 +134,35 @@ def _emit(on_step: OnStep | None, step: AttackStep) -> None:
         on_step(step)
 
 
+def _append_usage(records: list[UsageRecord], usage: UsageRecord | None) -> list[UsageRecord]:
+    if usage is None:
+        return list(records)
+    return [*records, usage]
+
+
+def _finish_llm_turn(
+    observed: object,
+    turn: PlannerTurn | JudgeTurn,
+    *,
+    output: object,
+) -> None:
+    finish = getattr(observed, "finish", None)
+    if finish is None:
+        return
+    usage = turn.usage
+    model = usage.model if usage is not None else None
+    if model is None and isinstance(turn.request_body, dict):
+        raw = turn.request_body.get("model")
+        model = raw if isinstance(raw, str) else None
+    finish(
+        output=output,
+        error=turn.error,
+        model=model,
+        input_tokens=usage.input_tokens if usage is not None else None,
+        output_tokens=usage.output_tokens if usage is not None else None,
+    )
+
+
 def _send_payload(
     target: Target,
     payload: UserContent,
@@ -175,12 +206,8 @@ def build_attempt_graph(
         )
         with log.planner(messages=build_planner_messages(context)) as observed:
             turn = planner.plan(context)
-            model = turn.request_body.get("model") if isinstance(turn.request_body, dict) else None
-            observed.finish(
-                output=turn.payload,
-                error=turn.error,
-                model=model if isinstance(model, str) else None,
-            )
+            _finish_llm_turn(observed, turn, output=turn.payload)
+        usage = _append_usage(state.usage, turn.usage)
         if turn.response is None:
             step = _error_step(
                 name="adapt",
@@ -204,8 +231,8 @@ def build_attempt_graph(
         steps.append(step)
         _emit(on_step, step)
         if turn.error:
-            return {"steps": steps, "error": turn.error, "payload": ""}
-        return {"steps": steps, "error": None, "payload": turn.payload}
+            return {"steps": steps, "error": turn.error, "payload": "", "usage": usage}
+        return {"steps": steps, "error": None, "payload": turn.payload, "usage": usage}
 
     def inject(state: AttemptState) -> dict:
         steps = list(state.steps)
@@ -308,12 +335,14 @@ def build_attempt_graph(
 
     def judge_result(state: AttemptState) -> dict:
         steps = list(state.steps)
-        turn = judge.judge(
-            JudgeContext(
-                success_check=scenario.success_check,
-                agent_response=state.last_assistant,
-            )
+        context = JudgeContext(
+            success_check=scenario.success_check,
+            agent_response=state.last_assistant,
         )
+        with log.judge(messages=build_judge_messages(context)) as observed:
+            turn = judge.judge(context)
+            _finish_llm_turn(observed, turn, output=turn.success)
+        usage = _append_usage(state.usage, turn.usage)
         if turn.response is None:
             step = _error_step(
                 name="judge",
@@ -340,6 +369,7 @@ def build_attempt_graph(
             "steps": steps,
             "error": turn.error,
             "success": turn.success if turn.error is None else False,
+            "usage": usage,
         }
 
     def after_adapt(state: AttemptState) -> str:
@@ -408,6 +438,7 @@ def run_attempt(
         "error": None,
         "usable_policy": False,
         "success": False,
+        "usage": [],
     }
     config = invoke_config or {}
     if config.get("callbacks"):
@@ -425,4 +456,5 @@ def run_attempt(
         session_a=state["session_a"],
         session_b=state["session_b"],
         steps=list(state["steps"]),
+        usage=list(state.get("usage") or []),
     )

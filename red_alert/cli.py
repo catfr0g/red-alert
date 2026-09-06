@@ -35,6 +35,7 @@ from red_alert.report import format_json_reports, mask_secrets
 from red_alert.runner import run_attack
 from red_alert.target import IsolateError
 from red_alert.tracing import LangfuseError, TraceSink, build_sink
+from red_alert.usage import format_usage_lines
 
 HTTP_TIMEOUT_SECONDS = 180.0
 
@@ -65,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument(
         "--analyzer",
         choices=("heuristic", "llm", "harness"),
-        help="backend анализа: heuristic, llm или harness (Codex)",
+        help="backend анализа: harness (Codex, по умолчанию), llm или heuristic",
     )
     attack.add_argument(
         "--auth-mode",
@@ -153,6 +154,10 @@ def _run_inspect(
         output.write_text(dump_profile(profile), encoding="utf-8")
         out = console or Console()
         out.print(f"Профиль: {output}")
+        usage = getattr(resolved, "usage", None)
+        if usage is not None:
+            for line in format_usage_lines([usage]):
+                out.print(line)
         return 0
     except UsageError as exc:
         print(str(exc), file=sys.stderr)

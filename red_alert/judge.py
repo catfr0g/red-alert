@@ -12,6 +12,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from red_alert.planner import LlmConfig
+from red_alert.usage import UsageRecord, parse_run_usage
 
 # TEMP: убрать после отладки judge
 JUDGE_LOG_PATH = Path("judge.log")
@@ -42,6 +43,7 @@ class JudgeTurn:
     url: str
     response: httpx.Response | None = None
     error: str | None = None
+    usage: UsageRecord | None = None
 
 
 class AttackJudge(Protocol):
@@ -124,6 +126,7 @@ class OpenAICompatJudge:
             "max_tokens": self.config.max_tokens,
             "chat_template_kwargs": {"enable_thinking": False},
         }
+        usage = UsageRecord(role="judge", model=self.config.model)
         try:
             result = self._agent.run_sync(messages[1]["content"])
         except Exception as exc:
@@ -134,7 +137,10 @@ class OpenAICompatJudge:
                 request_body=request_body,
                 url=url,
                 error=error,
+                usage=usage,
             )
+        prompt_tokens, completion_tokens = parse_run_usage(result)
+        usage = usage.plus_tokens(prompt_tokens, completion_tokens)
         verdict = result.output.success
         raw_response = result.output.model_dump_json()
         response = httpx.Response(200, json={"output": result.output.model_dump()})
@@ -149,4 +155,5 @@ class OpenAICompatJudge:
             request_body=request_body,
             url=url,
             response=response,
+            usage=usage,
         )

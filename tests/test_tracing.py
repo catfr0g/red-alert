@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
+from langfuse import Langfuse
 
 from red_alert.attacks import load_attack
 from red_alert.config import UsageError, resolve_config
@@ -10,6 +12,7 @@ from red_alert.dialogue import graph_node_input, graph_node_output, is_hidden_gr
 from red_alert.graph import AttemptState
 from red_alert.models import AttackStep, AttemptResult
 from red_alert.tracing import (
+    LangfuseDialogue,
     LangfuseError,
     LangfuseSink,
     NullSink,
@@ -332,6 +335,7 @@ class _RecordingObservation:
         self.trace_id = kwargs.get("forced_trace_id") or f"{len(sdk.started):032x}"
         self.id = f"{len(sdk.started):016x}"
         self.parent: _RecordingObservation | None = None
+        self.updates: list[dict] = []
 
     def __enter__(self) -> _RecordingObservation:
         self.parent = self.sdk.stack[-1] if self.sdk.stack else None
@@ -343,8 +347,8 @@ class _RecordingObservation:
         self.sdk.stack.pop()
         return False
 
-    def update(self, **_kwargs: object) -> None:
-        return
+    def update(self, **kwargs: object) -> None:
+        self.updates.append(dict(kwargs))
 
 
 class _RecordingSdk:
@@ -471,3 +475,21 @@ def test_compose_exposes_langfuse_ui() -> None:
     text = Path("docker-compose.yml").read_text(encoding="utf-8")
     assert "3000:3000" in text
     assert "langfuse-web" in text
+
+
+def test_langfuse_planner_and_judge_get_usage() -> None:
+    sdk = _RecordingSdk()
+    dialogue = LangfuseDialogue(cast(Langfuse, sdk))
+    with dialogue.planner(messages=[{"role": "user", "content": "x"}], model="vllm/qwen") as turn:
+        turn.finish(output="payload", model="vllm/qwen", input_tokens=15, output_tokens=4)
+    with dialogue.judge(messages=[{"role": "user", "content": "y"}], model="judge-m") as turn:
+        turn.finish(output=True, model="judge-m", input_tokens=8, output_tokens=1)
+    with dialogue.stand(user="hi", actor="attacker", session_id="s1") as turn:
+        turn.finish(output="ok")
+    planner = next(item for item in sdk.started if item.kwargs["name"] == "planner")
+    judge = next(item for item in sdk.started if item.kwargs["name"] == "judge")
+    stand = next(item for item in sdk.started if item.kwargs["name"] == "stand")
+    assert planner.updates[0]["model"] == "vllm/qwen"
+    assert planner.updates[0]["usage_details"] == {"input": 15, "output": 4}
+    assert judge.updates[0]["usage_details"] == {"input": 8, "output": 1}
+    assert "usage_details" not in stand.updates[0]

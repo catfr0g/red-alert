@@ -57,7 +57,10 @@ def test_openai_planner_posts_to_configured_url() -> None:
         seen.append(request)
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": "  payload YDEX  "}}]},
+            json={
+                "choices": [{"message": {"content": "  payload YDEX  "}}],
+                "usage": {"prompt_tokens": 21, "completion_tokens": 6},
+            },
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -80,6 +83,11 @@ def test_openai_planner_posts_to_configured_url() -> None:
     assert body["model"] == "openai/gpt-5-mini"
     assert body["max_tokens"] == 128
     assert "цель YDEX" in body["messages"][1]["content"]
+    assert turn.usage is not None
+    assert turn.usage.role == "planner"
+    assert turn.usage.model == "openai/gpt-5-mini"
+    assert turn.usage.input_tokens == 21
+    assert turn.usage.output_tokens == 6
 
 
 def _planner(handler: Callable[[httpx.Request], httpx.Response]) -> OpenAICompatPlanner:
@@ -110,15 +118,30 @@ def test_openai_planner_retries_empty_then_uses_text() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
-            return httpx.Response(200, json={"choices": [{"message": {"content": ""}}]})
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": ""}}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 0},
+                },
+            )
         body = json.loads(request.content.decode("utf-8"))
         assert body["messages"][-1]["content"] == RETRY_NUDGE
-        return httpx.Response(200, json={"choices": [{"message": {"content": "retry YDEX"}}]})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "retry YDEX"}}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 4},
+            },
+        )
 
     turn = _planner(handler).plan(_context())
     assert turn.error is None
     assert turn.payload == "retry YDEX"
     assert calls["n"] == 2
+    assert turn.usage is not None
+    assert turn.usage.input_tokens == 11
+    assert turn.usage.output_tokens == 4
 
 
 def test_openai_planner_falls_back_to_example_after_empty() -> None:

@@ -1,19 +1,24 @@
 from io import StringIO
 from pathlib import Path
 
+import httpx
 import pytest
 from rich.console import Console
 
 from red_alert.analyzer import (
+    CodexHarnessAnalyzer,
     FakeAnalyzer,
     HeuristicAnalyzer,
+    LlmAnalyzer,
     _extract_json_object,
     _parse_profile_payload,
     build_analyzer_prompt,
     catalog_brief,
     harness_schema_for,
+    resolve_analyzer_name,
 )
 from red_alert.cli import main
+from red_alert.planner import LlmConfig
 from red_alert.profile import CapabilityState, StandProfile
 
 
@@ -92,6 +97,55 @@ def test_inspect_skips_env_secrets(tmp_path: Path) -> None:
     assert "sk-secret-stand" not in dumped
 
 
+def test_resolve_analyzer_defaults_to_harness() -> None:
+    assert resolve_analyzer_name(None, {"OPENAI_API_KEY": "sk", "MODEL_ATTACK": "m"}) == "harness"
+    assert resolve_analyzer_name("llm", {}) == "llm"
+    assert resolve_analyzer_name("heuristic", {}) == "heuristic"
+
+
+def test_llm_analyzer_usage_is_inspect_role(tmp_path: Path) -> None:
+    source = tmp_path / "stand"
+    source.mkdir()
+    (source / "app.py").write_text("memory persist\n", encoding="utf-8")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"capabilities": {"persistent_memory": {"status": "present",'
+                                ' "confidence": "high"}, "multi_user": {"status": "absent",'
+                                ' "confidence": "high"}, "vision": {"status": "absent",'
+                                ' "confidence": "high"}}, "bindings": {}}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 30, "completion_tokens": 9},
+            },
+        )
+
+    analyzer = LlmAnalyzer(
+        LlmConfig(
+            api_key="sk",
+            base_url="https://vllm.test/v1",
+            model="local-qwen",
+            max_tokens=64,
+        ),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    profile = analyzer.analyze(source)
+    assert profile.capabilities["persistent_memory"].status == "present"
+    assert analyzer.usage is not None
+    assert analyzer.usage.role == "inspect"
+    assert analyzer.usage.model == "local-qwen"
+    assert analyzer.usage.input_tokens == 30
+    assert analyzer.usage.output_tokens == 9
+
+
 def test_inspect_llm_without_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = tmp_path / "stand"
     source.mkdir()
@@ -144,8 +198,6 @@ def test_parse_profile_from_noisy_output() -> None:
 def test_harness_sends_utf8_prompt_on_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from red_alert.analyzer import CodexHarnessAnalyzer
-
     source = tmp_path / "stand"
     source.mkdir()
     captured: dict[str, object] = {}
@@ -165,19 +217,29 @@ def test_harness_sends_utf8_prompt_on_stdin(
 
         class Result:
             returncode = 0
-            stdout = ""
+            stdout = (
+                '{"type":"thread.started","model":"gpt-5.3-codex"}\n'
+                '{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":6}}\n'
+            )
             stderr = ""
 
         return Result()
 
     monkeypatch.setattr("red_alert.analyzer.subprocess.run", _run)
-    profile = CodexHarnessAnalyzer().analyze(source)
+    analyzer = CodexHarnessAnalyzer()
+    profile = analyzer.analyze(source)
     assert captured["encoding"] == "utf-8"
     argv = captured["args"]
     assert isinstance(argv, list)
     assert argv[-1] == "-"
+    assert "--json" in argv
     assert "memory-poisoning" in str(captured["input"])
     assert profile.bindings["memory-poisoning"]["policy"] == "p"
+    assert analyzer.usage is not None
+    assert analyzer.usage.role == "inspect"
+    assert analyzer.usage.model == "gpt-5.3-codex"
+    assert analyzer.usage.input_tokens == 40
+    assert analyzer.usage.output_tokens == 6
 
 
 def test_inspect_harness_missing(
@@ -199,3 +261,24 @@ def test_inspect_harness_missing(
     err = capsys.readouterr().err
     assert code == 1
     assert "Codex" in err
+    assert "--analyzer llm" in err
+    assert "--analyzer heuristic" in err
+
+
+def test_inspect_default_missing_codex_hints(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "stand"
+    source.mkdir()
+
+    def _missing(*_args: object, **_kwargs: object) -> object:
+        raise FileNotFoundError("codex")
+
+    monkeypatch.setattr("red_alert.analyzer.subprocess.run", _missing)
+    code = main(["inspect", str(source)], environ={})
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "--analyzer llm" in err
+    assert "--analyzer heuristic" in err

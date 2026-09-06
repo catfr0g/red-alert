@@ -111,6 +111,17 @@ class LangfuseDialogue(DialogueLog):
             yield turn
 
     @contextmanager
+    def judge(self, *, messages: list[dict], model: str | None = None) -> Iterator[DialogueTurn]:
+        with self._observation(
+            name="judge",
+            as_type="generation",
+            input=messages,
+            model=model,
+            metadata={"agent": "judge"},
+        ) as turn:
+            yield turn
+
+    @contextmanager
     def stand(self, *, user: str, actor: str, session_id: str) -> Iterator[DialogueTurn]:
         with self._observation(
             name="stand",
@@ -172,6 +183,11 @@ class LangfuseDialogue(DialogueLog):
             update: dict = {"output": turn.output}
             if turn.model:
                 update["model"] = turn.model
+            if turn.input_tokens is not None or turn.output_tokens is not None:
+                update["usage_details"] = {
+                    "input": turn.input_tokens or 0,
+                    "output": turn.output_tokens or 0,
+                }
             if turn.error:
                 update["level"] = "ERROR"
                 update["status_message"] = turn.error

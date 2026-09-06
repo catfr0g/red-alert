@@ -170,6 +170,10 @@ def test_attack_success_prints_asr_and_chain(
     assert "attacker" in actors
     assert "victim" in actors
     assert "judge" in actors
+    assert report["usage"]["planner"]["model"] == "openai/gpt-5-mini"
+    assert report["usage"]["judge"]["model"] == "scripted"
+    assert "input_tokens" in report["usage"]["planner"]
+    assert "cost" not in report["usage"]["planner"]
     assert "scope" in path.read_text(encoding="utf-8")
     assert "global" in path.read_text(encoding="utf-8")
     bodies = [json.loads(req.content.decode()) for req in stand.requests if req.content]
