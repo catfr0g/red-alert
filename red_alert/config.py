@@ -3,21 +3,14 @@ from os import environ as os_environ
 from pathlib import Path
 from typing import Mapping
 
-DEFAULT_TARGET = "http://localhost:8600"
 DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MAX_TOKENS = 2048
-DEFAULT_AUTH_MODE = "vulnerable"
 DEFAULT_ISOLATION = "on"
 DEFAULT_LANGFUSE_BASE_URL = "http://localhost:3000"
-DEFAULT_TARGET_KIND = "invest"
-DEFAULT_OPENCLAW_MODEL = "openclaw/default"
-ALLOWED_AUTH_MODES = ("vulnerable", "protected")
 ALLOWED_ISOLATION = ("on", "off")
-ALLOWED_TARGET_KINDS = ("invest", "openclaw")
 ISOLATION_OFF_WARNING = (
     "Изоляция выключена: попытки могут наследовать память предыдущих прогонов, ASR не независим."
 )
-CHAT_COMPLETIONS_SUFFIX = "/v1/chat/completions"
 CHAT_COMPLETIONS_TAIL = "/chat/completions"
 
 
@@ -27,9 +20,6 @@ class UsageError(Exception):
 
 @dataclass(frozen=True)
 class AppConfig:
-    target: str
-    api_key: str
-    victim_api_key: str
     scenario: str | None
     attempts: int
     openai_api_key: str
@@ -40,12 +30,8 @@ class AppConfig:
     max_tokens: int
     debug: bool
     attacks_dir: Path
-    profile: str | None
-    auth_modes: tuple[str, ...]
+    profile: str
     isolation: str = DEFAULT_ISOLATION
-    target_kind: str = DEFAULT_TARGET_KIND
-    openclaw_model: str = DEFAULT_OPENCLAW_MODEL
-    reasoning: bool = False
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -75,13 +61,6 @@ def merged_environ(
     return {**file_vars, **overlay}
 
 
-def normalize_target(target: str) -> str:
-    resolved = target.strip().rstrip("/")
-    if resolved.endswith(CHAT_COMPLETIONS_SUFFIX):
-        resolved = resolved[: -len(CHAT_COMPLETIONS_SUFFIX)].rstrip("/")
-    return resolved
-
-
 def env_flag(value: str | None) -> bool:
     if value is None:
         return False
@@ -95,22 +74,6 @@ def resolve_isolation(raw: str | None) -> str:
     raise UsageError("--isolate / RED_ALERT_ISOLATE: on или off")
 
 
-def resolve_target_kind(raw: str | None) -> str:
-    value = (raw or DEFAULT_TARGET_KIND).strip().lower()
-    if value in ALLOWED_TARGET_KINDS:
-        return value
-    raise UsageError("--target-kind / RED_ALERT_TARGET_KIND: invest или openclaw")
-
-
-def resolve_auth_modes(raw: str | None) -> tuple[str, ...]:
-    value = (raw or DEFAULT_AUTH_MODE).strip().lower()
-    if value == "both":
-        return ALLOWED_AUTH_MODES
-    if value in ALLOWED_AUTH_MODES:
-        return (value,)
-    raise UsageError("--auth-mode / RED_ALERT_AUTH_MODE: vulnerable, protected или both")
-
-
 def normalize_llm_base(url: str) -> str:
     resolved = url.strip().rstrip("/")
     if resolved.endswith(CHAT_COMPLETIONS_TAIL):
@@ -120,42 +83,19 @@ def normalize_llm_base(url: str) -> str:
 
 def resolve_config(
     *,
-    target: str | None,
-    api_key: str | None,
-    victim_api_key: str | None,
     scenario: str | None,
     attempts: int,
     environ: Mapping[str, str],
     debug: bool = False,
     attacks_dir: str | None = None,
     profile: str | None = None,
-    auth_mode: str | None = None,
-    reasoning: bool = False,
     isolation: str | None = None,
-    target_kind: str | None = None,
 ) -> AppConfig:
-    resolved_kind = resolve_target_kind(
-        target_kind if target_kind is not None else environ.get("RED_ALERT_TARGET_KIND")
-    )
-    resolved_key = api_key or environ.get("RED_ALERT_API_KEY")
-    if not resolved_key:
-        raise UsageError("Нужен --api-key или переменная RED_ALERT_API_KEY")
-
-    resolved_victim = victim_api_key or environ.get("RED_ALERT_VICTIM_API_KEY")
-    if resolved_kind == "openclaw":
-        resolved_victim = resolved_victim or resolved_key
-    elif not resolved_victim:
-        raise UsageError("Нужен --victim-api-key или переменная RED_ALERT_VICTIM_API_KEY")
-    elif resolved_victim == resolved_key:
-        raise UsageError(
-            "--api-key и --victim-api-key должны принадлежать разным пользователям стенда"
-        )
-
-    resolved_target = target or environ.get("RED_ALERT_TARGET") or DEFAULT_TARGET
-    resolved_target = normalize_target(resolved_target)
-
     if attempts < 1:
         raise UsageError("--attempts должен быть >= 1")
+    resolved_profile = profile or environ.get("RED_ALERT_PROFILE")
+    if not resolved_profile:
+        raise UsageError("Нужен --profile или переменная RED_ALERT_PROFILE")
 
     openai_api_key = environ.get("OPENAI_API_KEY")
     if not openai_api_key:
@@ -202,9 +142,6 @@ def resolve_config(
         raise UsageError("Нужна переменная LANGFUSE_SECRET_KEY")
 
     return AppConfig(
-        target=resolved_target,
-        api_key=resolved_key,
-        victim_api_key=resolved_victim,
         scenario=scenario or None,
         attempts=attempts,
         openai_api_key=openai_api_key,
@@ -215,17 +152,10 @@ def resolve_config(
         max_tokens=max_tokens,
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
-        profile=profile or environ.get("RED_ALERT_PROFILE") or None,
-        auth_modes=resolve_auth_modes(auth_mode or environ.get("RED_ALERT_AUTH_MODE")),
-        reasoning=reasoning,
+        profile=resolved_profile,
         isolation=resolve_isolation(
             isolation if isolation is not None else environ.get("RED_ALERT_ISOLATE")
         ),
-        target_kind=resolved_kind,
-        openclaw_model=(
-            environ.get("RED_ALERT_OPENCLAW_MODEL") or DEFAULT_OPENCLAW_MODEL
-        ).strip()
-        or DEFAULT_OPENCLAW_MODEL,
         langfuse_enabled=langfuse_enabled,
         langfuse_public_key=langfuse_public_key,
         langfuse_secret_key=langfuse_secret_key,

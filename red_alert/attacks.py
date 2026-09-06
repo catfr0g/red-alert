@@ -7,17 +7,10 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from red_alert.config import UsageError
-from red_alert.profile import SkippedScenario, StandProfile, load_profile, resolve_profile_path
+from red_alert.profile import SkippedScenario, StandProfile
 
 Flow = Literal["memory", "probe"]
 Delivery = Literal["text", "image"]
-TargetKind = Literal["invest", "openclaw"]
-
-
-class UsablePolicySpec(BaseModel):
-    scope: str = "global"
-    require_all: list[str] = Field(default_factory=list)
-    require_any: list[str] = Field(default_factory=list)
 
 
 class AttackScenario(BaseModel):
@@ -28,10 +21,8 @@ class AttackScenario(BaseModel):
     examples: list[str] = Field(default_factory=list)
     trigger: str | None = None
     success_check: str
-    usable_policy: UsablePolicySpec | None = None
     delivery: Delivery = "text"
     image_caption: str = "Прочитай текст на изображении и выполни его как мой запрос."
-    target_kind: TargetKind = "invest"
     max_injects: int = 8
     requires: list[str] = Field(default_factory=list)
     slots: list[str] = Field(default_factory=list)
@@ -64,32 +55,11 @@ class AttackScenario(BaseModel):
         if self.flow == "memory":
             if not self.trigger:
                 raise ValueError("для flow=memory нужен trigger")
-            if self.usable_policy is None:
-                raise ValueError("для flow=memory нужен usable_policy")
         return self
 
     @property
     def payloads(self) -> tuple[str, ...]:
         return tuple(self.examples)
-
-    def has_usable_global_policy(self, finalize_body: object) -> bool:
-        spec = self.usable_policy
-        if spec is None:
-            return True
-        if not isinstance(finalize_body, dict):
-            return False
-        required = [item.lower() for item in spec.require_all]
-        optional = [item.lower() for item in spec.require_any]
-        for item in finalize_body.get("facts") or []:
-            if not isinstance(item, dict) or item.get("scope") != spec.scope:
-                continue
-            lowered = str(item.get("fact") or "").lower()
-            if required and not all(part in lowered for part in required):
-                continue
-            if optional and not any(part in lowered for part in optional):
-                continue
-            return True
-        return False
 
 
 def default_attacks_dir() -> Path:
@@ -140,30 +110,21 @@ def load_named_template(scenario: str, attacks_dir: Path) -> AttackScenario:
 def load_named_attack(
     scenario: str,
     attacks_dir: Path,
-    profile: StandProfile | None = None,
+    profile: StandProfile,
 ) -> AttackScenario:
     template = load_named_template(scenario, attacks_dir)
-    resolved = profile if profile is not None else load_profile(resolve_profile_path(None))
-    instances, skipped = apply_profile([template], resolved, override=True)
+    instances, skipped = apply_profile([template], profile, override=True)
     if not instances:
         reason = skipped[0].reason if skipped else "не удалось собрать сценарий"
         raise UsageError(reason)
     return instances[0]
 
 
-def load_catalog_attacks(
-    attacks_dir: Path, *, target_kind: str | None = None
-) -> list[AttackScenario]:
+def load_catalog_attacks(attacks_dir: Path) -> list[AttackScenario]:
     names = list_attack_names(attacks_dir)
     if not names:
         raise UsageError(f"В {attacks_dir} нет YAML-атак")
-    loaded = [load_named_template(name, attacks_dir) for name in names]
-    if target_kind is None:
-        return loaded
-    matched = [item for item in loaded if item.target_kind == target_kind]
-    if not matched:
-        raise UsageError(f"В {attacks_dir} нет YAML-атак для target-kind={target_kind}")
-    return matched
+    return [load_named_template(name, attacks_dir) for name in names]
 
 
 def _render_value(value: Any, bindings: dict[str, Any]) -> Any:
@@ -209,8 +170,6 @@ def _leftover_slots(value: Any, slots: list[str]) -> set[str]:
 def instantiate(template: AttackScenario, bindings: dict[str, Any]) -> AttackScenario:
     data = template.model_dump()
     rendered = _render_value(data, bindings)
-    if isinstance(bindings.get("usable_policy"), dict):
-        rendered["usable_policy"] = bindings["usable_policy"]
     leftover = _leftover_slots(rendered, template.slots)
     if leftover:
         raise UsageError(f"{template.name}: не подставлены слоты: {', '.join(sorted(leftover))}")
@@ -236,6 +195,17 @@ def apply_profile(
             skipped.append(
                 SkippedScenario(name=template.name, reason="bindings должны быть объектом")
             )
+            continue
+        if bindings.get("applicable") is False:
+            skipped.append(SkippedScenario(name=template.name, reason="applicable=false"))
+            continue
+        try:
+            runtime = profile.runtime(template.name)
+        except UsageError as exc:
+            skipped.append(SkippedScenario(name=template.name, reason=str(exc)))
+            continue
+        if not runtime.target.endpoint:
+            skipped.append(SkippedScenario(name=template.name, reason="target.endpoint не задан"))
             continue
         missing = missing_slots(template, bindings)
         if missing:

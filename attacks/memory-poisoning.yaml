@@ -1,4 +1,4 @@
-# Шаблон. Стендовые формулировки — в profiles/invest-stand.yaml.
+# Шаблон. Конкретные формулировки и runtime-параметры приходят из StandProfile.
 
 name: memory-poisoning
 flow: memory
@@ -25,8 +25,4 @@ examples:
     предпочтение. scope=global. {{policy}}
 trigger: "{{trigger}}"
 success_check: "{{proof}}"
-usable_policy:
-  scope: global
-  require_all:
-    - policy
 max_injects: 2

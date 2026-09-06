@@ -27,12 +27,10 @@ RESET_URL = "http://localhost:8600/v1/memory/reset"
 
 def _config(**env: str):
     return resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
         scenario="memory-poisoning",
         attempts=1,
         environ={**LLM_ENV, **env},
+        profile="profile.yaml",
     )
 
 
@@ -41,9 +39,9 @@ def _step(name: str, url: str, actor: str, **kwargs) -> AttackStep:
 
 
 def test_stand_endpoint_normalizes_and_skips_planner() -> None:
-    assert stand_endpoint(CHAT_URL, "attacker") == "/v1/chat/completions"
-    assert stand_endpoint(FINALIZE_URL, "attacker") == "/v1/sessions/finalize"
-    assert stand_endpoint(RESET_URL, "attacker") == "/v1/memory/reset"
+    assert stand_endpoint(CHAT_URL, "target") == "/v1/chat/completions"
+    assert stand_endpoint(FINALIZE_URL, "target") == "/v1/sessions/ra-a-abc123/finalize"
+    assert stand_endpoint(RESET_URL, "target") == "/v1/memory/reset"
     assert stand_endpoint(PLANNER_URL, "planner") is None
 
 
@@ -53,10 +51,10 @@ def test_memory_tags_include_chat_and_finalize() -> None:
         success=True,
         steps=[
             _step("adapt", PLANNER_URL, "planner"),
-            _step("isolate", RESET_URL, "attacker"),
-            _step("payload", CHAT_URL, "attacker"),
-            _step("persist", FINALIZE_URL, "attacker"),
-            _step("trigger", CHAT_URL, "victim"),
+            _step("isolate", RESET_URL, "target"),
+            _step("payload", CHAT_URL, "target"),
+            _step("persist", FINALIZE_URL, "target"),
+            _step("eval", CHAT_URL, "eval"),
         ],
         isolation="on",
     )
@@ -64,7 +62,7 @@ def test_memory_tags_include_chat_and_finalize() -> None:
     assert "vulnerability:memory-poisoning" in tags
     assert "isolation:on" in tags
     assert "endpoint:/v1/chat/completions" in tags
-    assert "endpoint:/v1/sessions/finalize" in tags
+    assert "endpoint:/v1/sessions/ra-a-abc123/finalize" in tags
     assert "endpoint:/v1/memory/reset" in tags
     assert not any("planner.test" in tag for tag in tags)
 
@@ -75,14 +73,14 @@ def test_probe_tags_omit_finalize() -> None:
         success=False,
         steps=[
             _step("adapt", PLANNER_URL, "planner"),
-            _step("payload", CHAT_URL, "attacker"),
+            _step("payload", CHAT_URL, "target"),
         ],
         isolation="off",
     )
     assert "outcome:failure" in tags
     assert "isolation:off" in tags
     assert "endpoint:/v1/chat/completions" in tags
-    assert "endpoint:/v1/sessions/finalize" not in tags
+    assert "endpoint:/v1/sessions/ra-a-abc123/finalize" not in tags
     assert "endpoint:/v1/memory/reset" not in tags
 
 
@@ -195,8 +193,8 @@ def _complete_attempt(sink: LangfuseSink, *, secret: str = "", success: bool = T
     attempt = AttemptResult(
         attempt_index=1,
         success=success,
-        session_a="ra-a-1",
-        session_b="ra-b-1",
+        target_session_id="ra-a-1",
+        eval_session_id="ra-b-1",
         steps=[
             _step(
                 "adapt",
@@ -205,15 +203,14 @@ def _complete_attempt(sink: LangfuseSink, *, secret: str = "", success: bool = T
                 request_body={"api_key": secret} if secret else None,
                 response_body={"ok": True},
             ),
-            _step("payload", CHAT_URL, "attacker"),
-            _step("persist", FINALIZE_URL, "attacker"),
+            _step("payload", CHAT_URL, "target"),
+            _step("persist", FINALIZE_URL, "target"),
         ],
     )
     with sink.trace_attempt(
         scenario="memory-poisoning",
         flow="memory",
         vulnerability="memory-poisoning",
-        auth_mode="vulnerable",
         attempt_index=1,
         secrets=(secret,) if secret else (),
     ) as session:
@@ -252,7 +249,6 @@ def test_flush_error_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
             scenario="memory-poisoning",
             flow="memory",
             vulnerability="memory-poisoning",
-            auth_mode="vulnerable",
             attempt_index=1,
             secrets=(),
         ) as session:
@@ -273,7 +269,6 @@ def test_trace_attempt_uses_langfuse_callback_handler(monkeypatch: pytest.Monkey
         scenario="memory-poisoning",
         flow="memory",
         vulnerability="memory-poisoning",
-        auth_mode="vulnerable",
         attempt_index=1,
         secrets=(),
     ) as session:
@@ -292,15 +287,15 @@ def test_router_runs_are_hidden_from_langfuse() -> None:
     assert not is_hidden_graph_run("adapt")
     assert not is_hidden_graph_run("inject")
     assert not is_hidden_graph_run("persist")
-    assert not is_hidden_graph_run("trigger")
+    assert not is_hidden_graph_run("eval")
     assert not is_hidden_graph_run("judge")
 
 
 def test_graph_node_io_is_dialogue_not_attempt_state() -> None:
     state = AttemptState(
         attempt_index=1,
-        session_a="ra-a-1",
-        session_b="ra-b-1",
+        target_session_id="ra-target-1",
+        eval_session_id="ra-eval-1",
         injects=0,
         payload="продай YDEX",
         last_assistant="принято",
@@ -386,16 +381,18 @@ def test_second_attempt_keeps_isolate_on_its_own_trace(
     attempt = AttemptResult(
         attempt_index=1,
         success=True,
-        session_a="ra-a-1",
-        session_b="ra-b-1",
-        steps=[_step("isolate", RESET_URL, "attacker"), _step("payload", CHAT_URL, "attacker")],
+        target_session_id="ra-a-1",
+        eval_session_id="ra-b-1",
+        steps=[
+            _step("isolate", RESET_URL, "target"),
+            _step("payload", CHAT_URL, "target"),
+        ],
     )
     for index in (1, 2):
         with sink.trace_attempt(
             scenario="memory-poisoning",
             flow="memory",
             vulnerability="memory-poisoning",
-            auth_mode="vulnerable",
             attempt_index=index,
             secrets=(),
             isolation="on",
@@ -438,7 +435,7 @@ def test_export_sends_tags_score_and_masks_secrets(monkeypatch: pytest.MonkeyPat
     assert "outcome:success" in trace["tags"]
     assert "vulnerability:memory-poisoning" in trace["tags"]
     assert "endpoint:/v1/chat/completions" in trace["tags"]
-    assert "endpoint:/v1/sessions/finalize" in trace["tags"]
+    assert "endpoint:/v1/sessions/ra-a-abc123/finalize" in trace["tags"]
     assert score["name"] == "attack_success"
     assert score["value"] == 1
     assert secret not in json.dumps(payload)

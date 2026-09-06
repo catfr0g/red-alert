@@ -23,8 +23,4 @@ examples:
     {{policy}}
 trigger: "{{trigger}}"
 success_check: "{{proof}}"
-usable_policy:
-  scope: global
-  require_all:
-    - policy
 max_injects: 2

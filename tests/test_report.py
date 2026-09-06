@@ -10,14 +10,18 @@ def test_asr_all_success() -> None:
         scenario="memory-poisoning",
         target="http://localhost:8600",
         attempts=[
-            AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1"),
-            AttemptResult(attempt_index=2, success=True, session_a="a2", session_b="b2"),
+            AttemptResult(
+                attempt_index=1, success=True, target_session_id="a1", eval_session_id="b1"
+            ),
+            AttemptResult(
+                attempt_index=2, success=True, target_session_id="a2", eval_session_id="b2"
+            ),
         ],
     )
     text = format_report(report, secrets=["secret"])
     assert "successful: 2/2" in text
     assert "ASR: 100%" in text
-    assert "auth_mode: vulnerable" in text
+    assert "auth_mode" not in text
     assert "isolation: on" in text
 
 
@@ -26,8 +30,12 @@ def test_asr_partial() -> None:
         scenario="memory-poisoning",
         target="http://localhost:8600",
         attempts=[
-            AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1"),
-            AttemptResult(attempt_index=2, success=False, session_a="a2", session_b="b2"),
+            AttemptResult(
+                attempt_index=1, success=True, target_session_id="a1", eval_session_id="b1"
+            ),
+            AttemptResult(
+                attempt_index=2, success=False, target_session_id="a2", eval_session_id="b2"
+            ),
         ],
     )
     text = format_report(report, secrets=["secret"])
@@ -47,8 +55,8 @@ def test_format_report_omits_authorization_header() -> None:
             AttemptResult(
                 attempt_index=1,
                 success=False,
-                session_a="a1",
-                session_b="b1",
+                target_session_id="a1",
+                eval_session_id="b1",
                 steps=[],
             )
         ],
@@ -67,30 +75,32 @@ def test_json_report_includes_only_successful_traces() -> None:
             AttemptResult(
                 attempt_index=1,
                 success=True,
-                session_a="a1",
-                session_b="b1",
+                target_session_id="a1",
+                eval_session_id="b1",
                 steps=[
                     AttackStep(
                         name="payload-1",
                         method="POST",
                         url="http://localhost:8600/v1/chat/completions",
-                        actor="attacker",
+                        actor="target",
                     ),
                     AttackStep(
                         name="persist",
                         method="POST",
                         url="http://localhost:8600/v1/sessions/a1/finalize",
-                        actor="attacker",
+                        actor="target",
                     ),
                     AttackStep(
-                        name="trigger",
+                        name="eval",
                         method="POST",
                         url="http://localhost:8600/v1/chat/completions",
-                        actor="victim",
+                        actor="eval",
                     ),
                 ],
             ),
-            AttemptResult(attempt_index=2, success=False, session_a="a2", session_b="b2"),
+            AttemptResult(
+                attempt_index=2, success=False, target_session_id="a2", eval_session_id="b2"
+            ),
         ],
     )
     payload = format_json_report(report, secrets=["sk-secret"])
@@ -98,7 +108,7 @@ def test_json_report_includes_only_successful_traces() -> None:
     assert '"attempt_index": 2' not in payload
     assert "payload-1" in payload
     assert "persist" in payload
-    assert "trigger" in payload
+    assert '"eval"' in payload
     assert "sk-secret" not in payload
 
 
@@ -110,8 +120,8 @@ def test_json_report_includes_failed_traces_when_asked() -> None:
             AttemptResult(
                 attempt_index=2,
                 success=False,
-                session_a="a2",
-                session_b="b2",
+                target_session_id="a2",
+                eval_session_id="b2",
                 steps=[
                     AttackStep(
                         name="adapt",
@@ -133,13 +143,25 @@ def test_json_reports_wraps_multiple_runs() -> None:
         RunReport(
             scenario="cross-user-portfolio",
             target="http://localhost:8600",
-            attempts=[AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1")],
+            attempts=[
+                AttemptResult(
+                    attempt_index=1,
+                    success=True,
+                    target_session_id="a1",
+                    eval_session_id="b1",
+                )
+            ],
         ),
         RunReport(
             scenario="memory-poisoning",
             target="http://localhost:8600",
             attempts=[
-                AttemptResult(attempt_index=1, success=False, session_a="a2", session_b="b2")
+                AttemptResult(
+                    attempt_index=1,
+                    success=False,
+                    target_session_id="a2",
+                    eval_session_id="b2",
+                )
             ],
         ),
     ]
@@ -159,7 +181,12 @@ def test_json_reports_include_skipped() -> None:
             scenario="memory-poisoning",
             target="http://localhost:8600",
             attempts=[
-                AttemptResult(attempt_index=1, success=False, session_a="a1", session_b="b1")
+                AttemptResult(
+                    attempt_index=1,
+                    success=False,
+                    target_session_id="a1",
+                    eval_session_id="b1",
+                )
             ],
         )
     ]
@@ -183,10 +210,17 @@ def test_json_reports_single_keeps_flat_shape() -> None:
     report = RunReport(
         scenario="memory-poisoning",
         target="http://localhost:8600",
-        attempts=[AttemptResult(attempt_index=1, success=True, session_a="a1", session_b="b1")],
+        attempts=[
+            AttemptResult(
+                attempt_index=1,
+                success=True,
+                target_session_id="a1",
+                eval_session_id="b1",
+            )
+        ],
     )
     payload = json.loads(format_json_reports([report], secrets=["sk-secret"]))
     assert payload["scenario"] == "memory-poisoning"
-    assert payload["auth_mode"] == "vulnerable"
+    assert "auth_mode" not in payload
     assert payload["isolation"] == "on"
     assert "runs" not in payload

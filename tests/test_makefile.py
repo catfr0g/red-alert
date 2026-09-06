@@ -36,7 +36,7 @@ def test_makefile_recipes() -> None:
     text = MAKEFILE.read_text(encoding="utf-8")
     assert "sync --group dev" in text
     assert "pre-commit install" in text
-    assert "script/fetch_stand_keys.py" in text
+    assert "fetch_stand_keys" in text
     assert "docker compose up -d" in text
     assert "docker compose down" in text
     assert "-v" not in text

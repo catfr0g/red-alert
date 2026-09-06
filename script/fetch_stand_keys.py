@@ -12,7 +12,7 @@ from typing import TextIO
 
 import httpx
 
-from red_alert.config import UsageError, merged_environ, normalize_target
+from red_alert.config import UsageError, merged_environ
 
 DEFAULT_TARGET = "http://localhost:8600"
 DEFAULT_KEYCLOAK_URL = "http://localhost:8180"
@@ -20,6 +20,7 @@ DEFAULT_REALM = "genai-stand"
 DEFAULT_CLIENT_ID = "streamlit-ui"
 DEFAULT_CLIENT_SECRET = "streamlit-ui-secret"
 DEFAULT_USERS = ("client1001", "client1002")
+CHAT_COMPLETIONS_TAIL = "/v1/chat/completions"
 KEY_RE = re.compile(r"sk-genai-[A-Za-z0-9_-]{20,}")
 HTTP_TIMEOUT_SECONDS = 30.0
 
@@ -38,6 +39,13 @@ class SetupConfig:
     users: tuple[str, ...]
     password: str | None
     env_file: Path
+
+
+def normalize_target(target: str) -> str:
+    resolved = target.strip().rstrip("/")
+    if resolved.endswith(CHAT_COMPLETIONS_TAIL):
+        resolved = resolved[: -len(CHAT_COMPLETIONS_TAIL)].rstrip("/")
+    return resolved
 
 
 def build_parser() -> argparse.ArgumentParser:

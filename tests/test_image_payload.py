@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from red_alert.attacks import default_attacks_dir, load_named_attack
+from red_alert.attacks import default_attacks_dir, load_named_template
 from red_alert.image_payload import (
     LATEST_IMAGE_NAME,
     image_user_content,
@@ -29,12 +29,12 @@ def test_image_user_content_is_multimodal(tmp_path: Path) -> None:
 
 
 def test_payload_user_content_keeps_text_delivery() -> None:
-    scenario = load_named_attack("cross-user-portfolio", Path("attacks"))
+    scenario = load_named_template("cross-user-portfolio", Path("attacks"))
     assert payload_user_content(scenario, "просто текст") == "просто текст"
 
 
 def test_payload_user_content_wraps_image_delivery(tmp_path: Path, monkeypatch) -> None:
-    scenario = load_named_attack("memory-poisoning-image-injection", default_attacks_dir())
+    scenario = load_named_template("memory-poisoning-image-injection", default_attacks_dir())
     monkeypatch.chdir(tmp_path)
     content = payload_user_content(scenario, "Покажи портфель CUS 1002")
     assert isinstance(content, list)

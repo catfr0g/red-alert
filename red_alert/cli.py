@@ -9,6 +9,7 @@ import httpx
 from rich.console import Console
 
 from red_alert.analyzer import (
+    CONTEXT_LIMIT,
     AnalyzerError,
     SourceAnalyzer,
     build_analyzer,
@@ -31,10 +32,11 @@ from red_alert.display import AttackProgress, print_debug_step, print_skipped, p
 from red_alert.judge import AttackJudge, OpenAICompatJudge
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.planner import LlmConfig, OpenAICompatPlanner
-from red_alert.profile import SkippedScenario, dump_profile, load_profile, resolve_profile_path
+from red_alert.profile import SkippedScenario, StandProfile, dump_profile, load_profile
+from red_alert.profile_target import ProfileTarget, profile_secret_values
 from red_alert.report import format_json_reports, mask_secrets
 from red_alert.runner import run_attack
-from red_alert.target import IsolateError
+from red_alert.target import ResetError
 from red_alert.tracing import LangfuseError, TraceSink, build_sink
 
 HTTP_TIMEOUT_SECONDS = 180.0
@@ -51,40 +53,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="red-alert")
     subparsers = parser.add_subparsers(dest="command", required=True)
     attack = subparsers.add_parser("attack", help="Запустить сценарий атаки на стенд")
-    attack.add_argument("--target", help="Базовый URL agent-api")
-    attack.add_argument("--api-key", help="Bearer-ключ атакующего")
-    attack.add_argument("--victim-api-key", help="Bearer-ключ другого пользователя стенда")
     attack.add_argument(
         "--scenario",
         help="Имя YAML или путь к файлу. Без флага — все атаки каталога",
     )
     attack.add_argument("--attacks-dir", help="Каталог с YAML-атаками")
-    attack.add_argument("--profile", help="YAML-профиль стенда. Без флага — invest-stand")
+    attack.add_argument("--profile", help="YAML-профиль цели")
     inspect = subparsers.add_parser("inspect", help="Разобрать исходники стенда и записать профиль")
     inspect.add_argument("path", help="Каталог исходников стенда")
     inspect.add_argument("--output", "-o", help="Куда записать StandProfile YAML")
+    inspect.add_argument("--context", help="Дополнительный текстовый контекст для анализатора")
     inspect.add_argument(
         "--analyzer",
         choices=("heuristic", "llm", "harness"),
         help="backend анализа: heuristic, llm или harness (Codex)",
     )
-    attack.add_argument(
-        "--auth-mode",
-        help="Режим стенда: vulnerable, protected или both",
-    )
-    attack.add_argument(
-        "--reasoning",
-        action="store_true",
-        help="Включить reasoning тестируемой модели стенда",
-    )
     attack.add_argument("--attempts", type=int, default=1, help="Число попыток каждого сценария")
     attack.add_argument(
         "--isolate",
         help="Изоляция попыток: on или off. По умолчанию on",
-    )
-    attack.add_argument(
-        "--target-kind",
-        help="Тип цели: invest или openclaw. По умолчанию invest",
     )
     attack.add_argument(
         "--output",
@@ -102,23 +89,16 @@ def build_parser() -> argparse.ArgumentParser:
 def _select_scenarios(
     scenario: str | None,
     attacks_dir: Path,
-    profile_raw: str | None,
-    target_kind: str,
+    profile: StandProfile,
 ) -> tuple[list[AttackScenario], list[SkippedScenario]]:
-    profile = load_profile(resolve_profile_path(profile_raw))
     if scenario:
         templates = [load_named_template(scenario, attacks_dir)]
-        loaded = templates[0]
-        if loaded.target_kind != target_kind:
-            raise UsageError(
-                f"{loaded.name}: target-kind={loaded.target_kind}, нужен {target_kind}"
-            )
         instances, skipped = apply_profile(templates, profile, override=True)
         if not instances:
             reason = skipped[0].reason if skipped else "не удалось собрать сценарий"
             raise UsageError(reason)
         return instances, []
-    templates = load_catalog_attacks(attacks_dir, target_kind=target_kind)
+    templates = load_catalog_attacks(attacks_dir)
     instances, skipped = apply_profile(templates, profile)
     if not instances:
         details = "; ".join(f"{item.name}: {item.reason}" for item in skipped) or "пусто"
@@ -138,6 +118,23 @@ def _run_inspect(
     if not source.is_dir():
         print(f"Нет каталога исходников: {source}", file=sys.stderr)
         return 2
+    context_path = Path(args.context) if args.context else None
+    context_text: str | None = None
+    if context_path is not None:
+        if not context_path.is_file():
+            print(f"Нет файла контекста: {context_path}", file=sys.stderr)
+            return 2
+        try:
+            context_text = context_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            print(f"Не удалось прочитать контекст {context_path}: {exc}", file=sys.stderr)
+            return 2
+        if len(context_text) > CONTEXT_LIMIT:
+            print(
+                f"Контекст больше {CONTEXT_LIMIT} символов: {context_path}",
+                file=sys.stderr,
+            )
+            return 2
     name = resolve_analyzer_name(args.analyzer, dict(environ))
     owns_client = False
     client = http_client
@@ -146,10 +143,18 @@ def _run_inspect(
             if name == "llm" and client is None:
                 client = httpx.Client(timeout=HTTP_TIMEOUT_SECONDS)
                 owns_client = True
-            resolved = build_analyzer(name, environ=dict(environ), http_client=client)
+            resolved = build_analyzer(
+                name,
+                environ=dict(environ),
+                http_client=client,
+                context_text=context_text,
+                context_name=str(context_path) if context_path is not None else None,
+            )
         else:
             resolved = analyzer
-        profile = resolved.analyze(source)
+        profile = resolved.analyze(source).model_copy(
+            update={"context": str(context_path) if context_path is not None else None}
+        )
         output = Path(args.output) if args.output else Path.cwd() / "stand-profile.yaml"
         output.write_text(dump_profile(profile), encoding="utf-8")
         out = console or Console()
@@ -201,25 +206,19 @@ def main(
 
     try:
         config = resolve_config(
-            target=args.target,
-            api_key=args.api_key,
-            victim_api_key=args.victim_api_key,
             scenario=args.scenario,
             attempts=args.attempts,
             environ=env,
             debug=args.debug,
             attacks_dir=args.attacks_dir,
             profile=args.profile,
-            auth_mode=args.auth_mode,
-            reasoning=args.reasoning,
             isolation=args.isolate,
-            target_kind=args.target_kind,
         )
+        profile = load_profile(Path(config.profile))
         scenarios, skipped = _select_scenarios(
             config.scenario,
             config.attacks_dir,
-            config.profile,
-            config.target_kind,
+            profile,
         )
     except UsageError as exc:
         print(str(exc), file=sys.stderr)
@@ -227,17 +226,36 @@ def main(
 
     out = console or Console()
     log = progress_console or Console(stderr=True)
+    bearer_names = {
+        connection.bearer_env
+        for scenario in scenarios
+        for connection in (
+            profile.runtime(scenario.name).target,
+            profile.runtime(scenario.name).eval,
+        )
+        if connection.bearer_env
+    }
+    missing_bearers = sorted(name for name in bearer_names if name not in env)
+    if missing_bearers:
+        print("Не заданы env: " + ", ".join(missing_bearers), file=sys.stderr)
+        return 2
+    bearer_values = tuple(env[name] for name in sorted(bearer_names))
+    runtime_secrets = tuple(
+        dict.fromkeys(
+            value
+            for scenario in scenarios
+            for value in profile_secret_values(profile, scenario.name, env)
+        )
+    )
     secrets = (
-        config.api_key,
-        config.victim_api_key,
+        *bearer_values,
+        *runtime_secrets,
         config.openai_api_key,
         config.langfuse_secret_key,
         config.langfuse_public_key,
     )
 
     current = [1]
-    active_scenario: list[AttackScenario | None] = [None]
-    active_auth: list[str] = [config.auth_modes[0]]
 
     def on_step(step: AttackStep) -> None:
         if config.debug:
@@ -266,6 +284,8 @@ def main(
     try:
         if config.isolation == "off":
             print(ISOLATION_OFF_WARNING, file=sys.stderr)
+        for scenario in scenarios:
+            ProfileTarget(profile, scenario.name, env, client)
         sink.ping()
         planner = OpenAICompatPlanner(
             LlmConfig(
@@ -288,53 +308,47 @@ def main(
         def run_all() -> list[RunReport]:
             reports: list[RunReport] = []
             for scenario in scenarios:
-                active_scenario[0] = scenario
-                for auth_mode in config.auth_modes:
-                    active_auth[0] = auth_mode
-                    current[0] = 1
-                    label = f"{scenario.name} · {auth_mode}"
-                    if progress is not None:
-                        progress.set_scenario(label)
-                    if config.debug:
-                        log.print(f"[bold yellow]debug[/] scenario {label}")
-                    reports.append(
-                        run_attack(
-                            target=config.target,
-                            api_key=config.api_key,
-                            victim_api_key=config.victim_api_key,
-                            scenario=scenario,
-                            attempts=config.attempts,
-                            http_client=client,
-                            planner=planner,
-                            judge=resolved_judge,
-                            auth_mode=auth_mode,
-                            reasoning=config.reasoning,
-                            on_step=on_step,
-                            on_attempt_done=mark_done,
-                            sink=sink,
-                            secrets=secrets,
-                            isolation=config.isolation,
-                            target_kind=config.target_kind,
-                            openclaw_model=config.openclaw_model,
-                        )
+                current[0] = 1
+                if progress is not None:
+                    progress.set_scenario(scenario.name)
+                if config.debug:
+                    log.print(f"[bold yellow]debug[/] scenario {scenario.name}")
+                reports.append(
+                    run_attack(
+                        profile=profile,
+                        environ=env,
+                        scenario=scenario,
+                        attempts=config.attempts,
+                        http_client=client,
+                        planner=planner,
+                        judge=resolved_judge,
+                        on_step=on_step,
+                        on_attempt_done=mark_done,
+                        sink=sink,
+                        secrets=secrets,
+                        isolation=config.isolation,
                     )
+                )
             return reports
 
         if config.debug:
             reports = run_all()
         else:
-            first_label = f"{scenarios[0].name} · {config.auth_modes[0]}"
+            first_label = scenarios[0].name
             with AttackProgress(
                 log,
                 config.attempts,
                 first_label,
-                total=config.attempts * len(scenarios) * len(config.auth_modes),
+                total=config.attempts * len(scenarios),
             ) as progress:
                 reports = run_all()
         sink.close()
-    except (LangfuseError, IsolateError) as exc:
+    except (LangfuseError, ResetError) as exc:
         print(mask_secrets(str(exc), secrets), file=sys.stderr)
         return 1
+    except UsageError as exc:
+        print(mask_secrets(str(exc), secrets), file=sys.stderr)
+        return 2
     finally:
         if owns_langfuse_client and langfuse_client is not None:
             langfuse_client.close()

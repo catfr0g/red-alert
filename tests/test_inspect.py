@@ -75,7 +75,46 @@ def test_inspect_does_not_need_stand_keys(tmp_path: Path) -> None:
     assert output.is_file()
 
 
-def test_heuristic_seeds_invest_bindings(tmp_path: Path) -> None:
+def test_inspect_writes_context_path(tmp_path: Path) -> None:
+    source = tmp_path / "stand"
+    source.mkdir()
+    context = tmp_path / "CONTEXT.md"
+    context.write_text("Target URL: http://agent.test/v1/chat/completions\n", encoding="utf-8")
+    output = tmp_path / "out.yaml"
+
+    code = main(
+        [
+            "inspect",
+            str(source),
+            "--context",
+            str(context),
+            "--output",
+            str(output),
+        ],
+        analyzer=FakeAnalyzer(StandProfile()),
+        console=_console(),
+    )
+
+    assert code == 0
+    assert f"context: {context}" in output.read_text(encoding="utf-8")
+
+
+def test_inspect_rejects_missing_context(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "stand"
+    source.mkdir()
+
+    code = main(
+        ["inspect", str(source), "--context", str(tmp_path / "missing.md")],
+        analyzer=FakeAnalyzer(StandProfile()),
+    )
+
+    assert code == 2
+    assert "Нет файла контекста" in capsys.readouterr().err
+
+
+def test_heuristic_does_not_seed_target_specific_bindings(tmp_path: Path) -> None:
     source = tmp_path / "genai-invest-agent-memory-stand"
     source.mkdir()
     (source / "readme.md").write_text(
@@ -83,8 +122,7 @@ def test_heuristic_seeds_invest_bindings(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     profile = HeuristicAnalyzer().analyze(source)
-    assert profile.bindings["memory-poisoning"]["policy"]
-    assert "YDEX" in profile.bindings["memory-poisoning"]["proof"]
+    assert profile.bindings == {}
 
 
 def test_heuristic_unknown_repo_has_empty_bindings(tmp_path: Path) -> None:
@@ -162,20 +200,51 @@ def test_inspect_llm_without_key(tmp_path: Path, capsys: pytest.CaptureFixture[s
 def test_harness_schema_is_strict() -> None:
     schema = harness_schema_for(catalog_brief())
     assert schema["additionalProperties"] is False
-    assert set(schema["required"]) == {"source", "capabilities", "bindings"}
+    assert set(schema["required"]) == {
+        "source",
+        "context",
+        "reset",
+        "defaults",
+        "capabilities",
+        "bindings",
+    }
     assert schema["properties"]["bindings"]["additionalProperties"] is False
     assert "memory-poisoning" in schema["properties"]["bindings"]["required"]
     assert "memory-poisoning" in schema["properties"]["bindings"]["properties"]
     memory = schema["properties"]["bindings"]["properties"]["memory-poisoning"]
-    assert set(memory["required"]) == {"policy", "trigger", "proof"}
+    assert set(memory["required"]) == {
+        "applicable",
+        "policy",
+        "trigger",
+        "proof",
+        "target",
+        "eval",
+        "persist",
+    }
+    assert set(memory["properties"]["target"]["required"]) == {
+        "inherit",
+        "endpoint",
+        "bearer_env",
+        "model",
+        "prompt",
+        "custom_body",
+        "custom_headers",
+    }
 
 
 def test_analyzer_prompt_includes_catalog_slots() -> None:
-    text = build_analyzer_prompt(Path("stand-src"))
+    text = build_analyzer_prompt(
+        Path("stand-src"),
+        context_text="Use https://agent.test/v1/chat/completions and TARGET_TOKEN",
+        context_name="CONTEXT.md",
+    )
     assert "memory-poisoning" in text
     assert "policy" in text
     assert "trigger" in text
     assert "proof" in text
+    assert "https://agent.test/v1/chat/completions" in text
+    assert "CONTEXT.md" in text
+    assert "bearer_env" in text
     names = {item["name"] for item in catalog_brief()}
     assert "memory-poisoning" in names
 
@@ -213,6 +282,41 @@ def test_normalize_profile_keeps_bindings() -> None:
     normalized = _normalize_profile_data(data)
     profile = StandProfile.model_validate(normalized)
     assert profile.bindings["memory-poisoning"]["policy"] == "p"
+
+
+def test_normalize_profile_converts_strict_schema_fields_to_objects() -> None:
+    normalized = _normalize_profile_data(
+        {
+            "reset": {
+                "method": "POST",
+                "endpoint": "http://agent.test/reset",
+                "bearer_from": "target",
+                "custom_body": None,
+                "custom_headers": None,
+                "expected_body": [{"name": "status", "value": "reset"}],
+            },
+            "bindings": {
+                "memory-poisoning": {
+                    "target": {
+                        "custom_body": [
+                            {"name": "session_id", "value": "${target_session_id}"},
+                            {"name": "reasoning", "value": False},
+                        ],
+                        "custom_headers": None,
+                    },
+                    "eval": {"custom_body": None, "custom_headers": None},
+                    "persist": None,
+                }
+            },
+        }
+    )
+
+    assert normalized["reset"]["expected_body"] == {"status": "reset"}
+    target = normalized["bindings"]["memory-poisoning"]["target"]
+    assert target["custom_body"] == {
+        "session_id": "${target_session_id}",
+        "reasoning": False,
+    }
 
 
 def test_parse_profile_from_noisy_output() -> None:
@@ -333,7 +437,11 @@ def test_harness_sends_prompt_on_stdin(tmp_path: Path, monkeypatch: pytest.Monke
         return 0, ""
 
     monkeypatch.setattr("red_alert.analyzer._run_codex_container", _run)
-    profile = CodexHarnessAnalyzer({"CODEX_HOME": str(host_codex_home)}).analyze(source)
+    profile = CodexHarnessAnalyzer(
+        {"CODEX_HOME": str(host_codex_home)},
+        context_text="Use https://agent.test/v1/chat/completions",
+        context_name="CONTEXT.md",
+    ).analyze(source)
     argv = captured["args"]
     assert isinstance(argv, list)
     assert argv[-1] == "-"
@@ -348,6 +456,8 @@ def test_harness_sends_prompt_on_stdin(tmp_path: Path, monkeypatch: pytest.Monke
     assert "--add-dir" not in argv
     assert "memory-poisoning" in str(captured["input"])
     assert CONTAINER_WORKSPACE in str(captured["input"])
+    assert "https://agent.test/v1/chat/completions" in str(captured["input"])
+    assert profile.context == "CONTEXT.md"
     assert profile.bindings["memory-poisoning"]["policy"] == "p"
     trace = codex_trace_path()
     assert trace == tmp_path / "analysis_artifacts" / "latest_codex_trace.jsonl"

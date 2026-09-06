@@ -1,17 +1,17 @@
 ## Purpose
 
-Корневой `Makefile` даёт короткие цели для локальной работы: среда uv, ключи стенда, Langfuse, проверки и прогон атаки. Цели только оборачивают уже существующие команды.
+Корневой `Makefile` даёт короткие цели для локальной работы: среда uv, Langfuse, проверки и прогон атаки. Цели только оборачивают уже существующие команды.
 
 ## Requirements
 
 ### Requirement: Корневой Makefile со списком целей
 
-СИСТЕМА ДОЛЖНА (MUST) содержать `Makefile` в корне репозитория. Запуск `make` без аргументов печатает список целей и завершается с кодом 0. В списке есть `setup`, `keys`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check` и `attack`.
+СИСТЕМА ДОЛЖНА (MUST) содержать `Makefile` в корне репозитория. Запуск `make` без аргументов печатает список целей и завершается с кодом 0. В списке есть `setup`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check` и `attack`.
 
 #### Scenario: make без аргументов
 
 - **WHEN** пользователь выполняет `make` в корне репозитория
-- **THEN** процесс завершается с кодом 0 и в выводе есть имена `setup`, `keys`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check`, `attack`
+- **THEN** процесс завершается с кодом 0 и в выводе есть имена `setup`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check`, `attack`
 
 ### Requirement: Цель setup готовит среду uv
 
@@ -21,15 +21,6 @@
 
 - **WHEN** просматривают рецепт цели `setup`
 - **THEN** в нём есть `uv sync --group dev` и `pre-commit install`
-
-### Requirement: Цель keys выпускает ключи стенда
-
-СИСТЕМА ДОЛЖНА (MUST) в цели `keys` запустить `script/fetch_stand_keys.py` через `uv run python`.
-
-#### Scenario: Рецепт keys вызывает скрипт
-
-- **WHEN** просматривают рецепт цели `keys`
-- **THEN** в нём есть `script/fetch_stand_keys.py`
 
 ### Requirement: Цели Langfuse поднимают и опускают локальный compose
 

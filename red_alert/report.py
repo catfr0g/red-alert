@@ -16,7 +16,6 @@ def format_summary(report: RunReport) -> str:
     lines = [
         f"scenario: {report.scenario}",
         f"target: {report.target}",
-        f"auth_mode: {report.auth_mode}",
         f"isolation: {report.isolation}",
         f"successful: {report.successful_count}/{report.total_count}",
         f"ASR: {asr_percent}",
@@ -39,7 +38,6 @@ def report_payload(report: RunReport, *, include_failed: bool = False) -> dict:
     return {
         "scenario": report.scenario,
         "target": report.target,
-        "auth_mode": report.auth_mode,
         "isolation": report.isolation,
         "successful": report.successful_count,
         "total": report.total_count,
@@ -47,8 +45,8 @@ def report_payload(report: RunReport, *, include_failed: bool = False) -> dict:
         "traces": [
             {
                 "attempt_index": attempt.attempt_index,
-                "session_a": attempt.session_a,
-                "session_b": attempt.session_b,
+                "target_session_id": attempt.target_session_id,
+                "eval_session_id": attempt.eval_session_id,
                 "steps": [step.model_dump() for step in attempt.steps],
             }
             for attempt in report.attempts

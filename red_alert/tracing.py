@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -30,10 +29,7 @@ from red_alert.models import AttackStep, AttemptResult
 from red_alert.report import mask_secrets
 
 PLANNER_ACTOR = "planner"
-CHAT_PATH = "/v1/chat/completions"
-FINALIZE_PATH = "/v1/sessions/finalize"
-FINALIZE_RE = re.compile(r"^/v1/sessions/[^/]+/finalize/?$")
-RESET_PATH = "/v1/memory/reset"
+TARGET_ACTORS = frozenset({"target", "eval"})
 
 
 class LangfuseError(Exception):
@@ -126,7 +122,7 @@ class LangfuseDialogue(DialogueLog):
             name="persist",
             as_type="span",
             input={"session_id": session_id, "action": "persist"},
-            metadata={"dialogue": "attacker", "session_id": session_id},
+            metadata={"dialogue": "target", "session_id": session_id},
         ) as turn:
             yield turn
 
@@ -199,7 +195,6 @@ class TraceSink(Protocol):
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
         isolation: str = "on",
@@ -231,7 +226,6 @@ class NullSink:
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
         isolation: str = "on",
@@ -251,7 +245,6 @@ class _LangfuseTrace:
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
         isolation: str,
@@ -269,7 +262,6 @@ class _LangfuseTrace:
         self._scenario = scenario
         self._flow = flow
         self._vulnerability = vulnerability
-        self._auth_mode = auth_mode
         self._isolation = isolation
         self._secrets = secrets
 
@@ -293,11 +285,10 @@ class _LangfuseTrace:
             metadata={
                 "scenario": self._scenario,
                 "flow": self._flow,
-                "auth_mode": self._auth_mode,
                 "isolation": self._isolation,
                 "attempt_index": attempt.attempt_index,
-                "session_a": attempt.session_a,
-                "session_b": attempt.session_b,
+                "target_session_id": attempt.target_session_id,
+                "eval_session_id": attempt.eval_session_id,
             },
             dialogues=self.dialogue.dialogues,
             secrets=self._secrets,
@@ -353,7 +344,6 @@ class LangfuseSink:
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
         isolation: str = "on",
@@ -363,7 +353,6 @@ class LangfuseSink:
         metadata = {
             "scenario": scenario,
             "flow": flow,
-            "auth_mode": auth_mode,
             "isolation": isolation,
             "attempt_index": attempt_index,
         }
@@ -396,7 +385,6 @@ class LangfuseSink:
                     scenario=scenario,
                     flow=flow,
                     vulnerability=vulnerability,
-                    auth_mode=auth_mode,
                     attempt_index=attempt_index,
                     secrets=merged,
                     isolation=isolation,
@@ -534,16 +522,9 @@ def build_sink(
 
 
 def stand_endpoint(url: str, actor: str | None) -> str | None:
-    if actor == PLANNER_ACTOR:
+    if actor not in TARGET_ACTORS:
         return None
-    path = urlparse(url).path
-    if path.endswith(CHAT_PATH):
-        return CHAT_PATH
-    if FINALIZE_RE.match(path) or path.endswith("/finalize"):
-        return FINALIZE_PATH
-    if path.rstrip("/").endswith(RESET_PATH) or path.endswith("/memory/reset"):
-        return RESET_PATH
-    return None
+    return urlparse(url).path or "/"
 
 
 def attempt_tags(

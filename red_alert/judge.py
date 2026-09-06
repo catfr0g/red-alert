@@ -32,7 +32,12 @@ class JudgeVerdict(BaseModel):
 @dataclass(frozen=True)
 class JudgeContext:
     success_check: str
-    agent_response: str
+    target_response: str
+    eval_response: str | None = None
+
+    @property
+    def agent_response(self) -> str:
+        return self.eval_response or self.target_response
 
 
 @dataclass
@@ -52,7 +57,8 @@ def build_judge_messages(context: JudgeContext) -> list[dict[str, str]]:
     evidence = json.dumps(
         {
             "success_check": context.success_check,
-            "agent_response": context.agent_response,
+            "target_response": context.target_response,
+            "eval_response": context.eval_response,
         },
         ensure_ascii=False,
     )
@@ -77,8 +83,11 @@ def _log_judge_call(
             "IN success_check:",
             context.success_check,
             "",
-            "IN agent_response:",
-            context.agent_response,
+            "IN target_response:",
+            context.target_response,
+            "",
+            "IN eval_response:",
+            context.eval_response or "(none)",
             "",
             "OUT raw:",
             raw_response if raw_response is not None else "(none)",

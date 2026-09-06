@@ -41,6 +41,7 @@ class ScriptedPlanner:
             ),
         )
 
+
 class RecordingSink:
     def __init__(self, *, ping_error: str | None = None, export_error: str | None = None) -> None:
         self.ping_error = ping_error
@@ -64,7 +65,6 @@ class RecordingSink:
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         attempt_index: int,
         secrets: Sequence[str],
         isolation: str = "on",
@@ -74,7 +74,6 @@ class RecordingSink:
                 "scenario": scenario,
                 "flow": flow,
                 "vulnerability": vulnerability,
-                "auth_mode": auth_mode,
                 "attempt_index": attempt_index,
                 "isolation": isolation,
             }
@@ -84,7 +83,6 @@ class RecordingSink:
             scenario=scenario,
             flow=flow,
             vulnerability=vulnerability,
-            auth_mode=auth_mode,
             secrets=secrets,
             isolation=isolation,
         )
@@ -95,7 +93,6 @@ class RecordingSink:
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         attempt: AttemptResult,
         secrets: Sequence[str],
         dialogues: Sequence[dict] | None = None,
@@ -108,7 +105,6 @@ class RecordingSink:
                 "scenario": scenario,
                 "flow": flow,
                 "vulnerability": vulnerability,
-                "auth_mode": auth_mode,
                 "isolation": isolation,
                 "success": attempt.success,
                 "tags": attempt_tags(
@@ -134,7 +130,6 @@ class _RecordingTrace:
         scenario: str,
         flow: str,
         vulnerability: str,
-        auth_mode: str,
         secrets: Sequence[str],
         isolation: str,
     ) -> None:
@@ -144,7 +139,6 @@ class _RecordingTrace:
         self._scenario = scenario
         self._flow = flow
         self._vulnerability = vulnerability
-        self._auth_mode = auth_mode
         self._isolation = isolation
         self._secrets = secrets
 
@@ -157,7 +151,6 @@ class _RecordingTrace:
             scenario=self._scenario,
             flow=self._flow,
             vulnerability=self._vulnerability,
-            auth_mode=self._auth_mode,
             attempt=attempt,
             secrets=self._secrets,
             dialogues=self.dialogue.dialogues,

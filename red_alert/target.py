@@ -4,11 +4,11 @@ import httpx
 
 from red_alert.models import AttackStep
 
-PRINCIPAL_ATTACKER = "attacker"
-PRINCIPAL_VICTIM = "victim"
+PRINCIPAL_TARGET = "target"
+PRINCIPAL_EVAL = "eval"
 
 
-class IsolateError(Exception):
+class ResetError(Exception):
     """Isolation failed; the attempt must not enter ASR."""
 
     def __init__(self, message: str, step: AttackStep | None = None) -> None:
@@ -37,20 +37,11 @@ UserContent = str | list
 
 
 class Target(Protocol):
+    @property
+    def eval_prompt(self) -> str | None: ...
+
     def chat(self, *, principal: str, session_id: str, user_content: UserContent) -> TargetTurn: ...
 
-    def persist(self, *, principal: str, session_id: str) -> TargetTurn: ...
+    def persist(self, *, principal: str, session_id: str) -> TargetTurn | None: ...
 
-    def isolate(self) -> TargetTurn: ...
-
-
-def isolate_error(response: httpx.Response) -> str | None:
-    if not response.is_success:
-        return f"HTTP {response.status_code}"
-    try:
-        body = response.json()
-    except ValueError:
-        return "ответ без status=reset"
-    if not isinstance(body, dict) or body.get("status") != "reset":
-        return "ответ без status=reset"
-    return None
+    def isolate(self) -> TargetTurn | None: ...

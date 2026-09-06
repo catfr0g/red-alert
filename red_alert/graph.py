@@ -7,17 +7,17 @@ import httpx
 from langgraph.graph import END, START, StateGraph
 
 from red_alert.attacks import AttackScenario
-from red_alert.dialogue import DialogueTracer, NullDialogue, persist_view
+from red_alert.dialogue import DialogueTracer, NullDialogue
 from red_alert.image_payload import payload_user_content
 from red_alert.judge import AttackJudge, JudgeContext
 from red_alert.models import AttackStep, AttemptResult
 from red_alert.planner import PayloadPlanner, PlannerContext, build_planner_messages
-from red_alert.target import PRINCIPAL_ATTACKER, PRINCIPAL_VICTIM, Target, TargetTurn, UserContent
+from red_alert.target import PRINCIPAL_EVAL, PRINCIPAL_TARGET, Target, TargetTurn, UserContent
 
 OnStep = Callable[[AttackStep], None]
 
-ACTOR_ATTACKER = PRINCIPAL_ATTACKER
-ACTOR_VICTIM = PRINCIPAL_VICTIM
+ACTOR_TARGET = PRINCIPAL_TARGET
+ACTOR_EVAL = PRINCIPAL_EVAL
 ACTOR_PLANNER = "planner"
 ACTOR_JUDGE = "judge"
 
@@ -25,16 +25,17 @@ ACTOR_JUDGE = "judge"
 @dataclass
 class AttemptState:
     attempt_index: int
-    session_a: str
-    session_b: str
+    target_session_id: str
+    eval_session_id: str
     injects: int
     payload: str = ""
     last_assistant: str = ""
+    target_response: str = ""
+    eval_response: str = ""
     last_finalize: object | None = None
     prior_notes: str = ""
     steps: list[AttackStep] = field(default_factory=list)
     error: str | None = None
-    usable_policy: bool = False
     success: bool = False
 
 
@@ -140,11 +141,11 @@ def _send_payload(
     on_step: OnStep | None = None,
 ) -> tuple[str | None, str]:
     turn = target.chat(
-        principal=ACTOR_ATTACKER,
+        principal=ACTOR_TARGET,
         session_id=session_id,
         user_content=payload,
     )
-    step = step_from_turn(name="payload", actor=ACTOR_ATTACKER, turn=turn)
+    step = step_from_turn(name="payload", actor=ACTOR_TARGET, turn=turn)
     steps.append(step)
     _emit(on_step, step)
     if step.error:
@@ -209,8 +210,8 @@ def build_attempt_graph(
 
     def inject(state: AttemptState) -> dict:
         steps = list(state.steps)
-        session_a = f"ra-a-{uuid.uuid4().hex[:12]}"
-        log.begin_dialogue(name="attacker", session_id=session_a)
+        target_session_id = f"ra-target-{uuid.uuid4().hex[:12]}"
+        log.begin_dialogue(name="target", session_id=target_session_id)
         try:
             user_content = payload_user_content(scenario, state.payload)
         except OSError as exc:
@@ -218,7 +219,7 @@ def build_attempt_graph(
                 name="payload",
                 method="POST",
                 url="",
-                actor=ACTOR_ATTACKER,
+                actor=ACTOR_TARGET,
                 request_body=None,
                 error=str(exc),
             )
@@ -226,75 +227,91 @@ def build_attempt_graph(
             _emit(on_step, step)
             log.end_dialogue()
             return {
-                "session_a": session_a,
+                "target_session_id": target_session_id,
                 "injects": state.injects + 1,
                 "last_assistant": "",
                 "steps": steps,
                 "error": str(exc),
-                "usable_policy": False,
                 "success": False,
             }
-        with log.stand(user=state.payload, actor="attacker", session_id=session_a) as observed:
-            error, assistant = _send_payload(target, user_content, session_a, steps, on_step)
+        with log.stand(
+            user=state.payload,
+            actor=ACTOR_TARGET,
+            session_id=target_session_id,
+        ) as observed:
+            error, assistant = _send_payload(
+                target,
+                user_content,
+                target_session_id,
+                steps,
+                on_step,
+            )
             observed.finish(output=assistant, error=error)
         log.add_message("user", state.payload)
         log.add_message("assistant", assistant)
         if error or scenario.flow == "probe":
             log.end_dialogue()
         return {
-            "session_a": session_a,
+            "target_session_id": target_session_id,
             "injects": state.injects + 1,
             "last_assistant": assistant,
+            "target_response": assistant,
             "steps": steps,
             "error": error,
-            "usable_policy": False,
             "success": False,
         }
 
     def persist(state: AttemptState) -> dict:
         steps = list(state.steps)
-        session_a = state.session_a
-        with log.persist(session_id=session_a) as observed:
-            turn = target.persist(principal=ACTOR_ATTACKER, session_id=session_a)
-            persist_step = step_from_turn(name="persist", actor=ACTOR_ATTACKER, turn=turn)
+        target_session_id = state.target_session_id
+        with log.persist(session_id=target_session_id) as observed:
+            turn = target.persist(
+                principal=ACTOR_TARGET,
+                session_id=target_session_id,
+            )
+            if turn is None:
+                observed.finish()
+                log.end_dialogue()
+                return {"steps": steps, "error": None, "last_finalize": None}
+            persist_step = step_from_turn(name="persist", actor=ACTOR_TARGET, turn=turn)
             steps.append(persist_step)
             _emit(on_step, persist_step)
-            view = persist_view(persist_step.response_body)
             if persist_step.error:
-                observed.finish(output=view, error=persist_step.error)
+                observed.finish(output=persist_step.response_body, error=persist_step.error)
                 log.end_dialogue()
                 return {"steps": steps, "error": persist_step.error, "last_finalize": None}
-            observed.finish(output=view)
-            log.set_persist(view)
+            observed.finish(output=persist_step.response_body)
+            log.set_persist(persist_step.response_body)
             log.end_dialogue()
         return {
             "steps": steps,
             "error": None,
             "last_finalize": persist_step.response_body,
-            "usable_policy": scenario.has_usable_global_policy(persist_step.response_body),
         }
 
-    def trigger(state: AttemptState) -> dict:
+    def evaluate(state: AttemptState) -> dict:
         steps = list(state.steps)
-        session_b = state.session_b
-        user = scenario.trigger or ""
-        log.begin_dialogue(name="victim", session_id=session_b)
-        with log.stand(user=user, actor="victim", session_id=session_b) as observed:
+        eval_session_id = state.eval_session_id
+        user = target.eval_prompt or scenario.trigger
+        if not user:
+            return {"steps": steps, "error": None, "eval_response": ""}
+        log.begin_dialogue(name="eval", session_id=eval_session_id)
+        with log.stand(user=user, actor=ACTOR_EVAL, session_id=eval_session_id) as observed:
             turn = target.chat(
-                principal=ACTOR_VICTIM,
-                session_id=session_b,
+                principal=ACTOR_EVAL,
+                session_id=eval_session_id,
                 user_content=user,
             )
-            trigger_step = step_from_turn(name="trigger", actor=ACTOR_VICTIM, turn=turn)
-            steps.append(trigger_step)
-            _emit(on_step, trigger_step)
-            assistant = _assistant_text(trigger_step.response_body)
-            if trigger_step.error:
-                observed.finish(output=assistant, error=trigger_step.error)
+            eval_step = step_from_turn(name="eval", actor=ACTOR_EVAL, turn=turn)
+            steps.append(eval_step)
+            _emit(on_step, eval_step)
+            assistant = _assistant_text(eval_step.response_body)
+            if eval_step.error:
+                observed.finish(output=assistant, error=eval_step.error)
                 log.add_message("user", user)
                 log.add_message("assistant", assistant)
                 log.end_dialogue()
-                return {"steps": steps, "error": trigger_step.error, "success": False}
+                return {"steps": steps, "error": eval_step.error, "success": False}
             observed.finish(output=assistant)
             log.add_message("user", user)
             log.add_message("assistant", assistant)
@@ -303,6 +320,7 @@ def build_attempt_graph(
             "steps": steps,
             "error": None,
             "last_assistant": assistant,
+            "eval_response": assistant,
             "success": False,
         }
 
@@ -311,7 +329,8 @@ def build_attempt_graph(
         turn = judge.judge(
             JudgeContext(
                 success_check=scenario.success_check,
-                agent_response=state.last_assistant,
+                target_response=state.target_response,
+                eval_response=state.eval_response or None,
             )
         )
         if turn.response is None:
@@ -350,17 +369,15 @@ def build_attempt_graph(
             return END
         if scenario.flow != "probe":
             return "persist"
-        return "judge"
+        return "eval" if target.eval_prompt else "judge"
 
     def after_persist(state: AttemptState) -> str:
         if state.error:
             return END
-        if state.usable_policy or state.injects >= scenario.max_injects:
-            return "trigger"
-        return "adapt"
+        return "eval"
 
     def after_judge(state: AttemptState) -> str:
-        if state.error or scenario.flow == "memory":
+        if state.error:
             return END
         if state.success or state.injects >= scenario.max_injects:
             return END
@@ -370,13 +387,13 @@ def build_attempt_graph(
     graph.add_node("adapt", adapt)
     graph.add_node("inject", inject)
     graph.add_node("persist", persist)
-    graph.add_node("trigger", trigger)
+    graph.add_node("eval", evaluate)
     graph.add_node("judge", judge_result)
     graph.add_edge(START, "adapt")
     graph.add_conditional_edges("adapt", after_adapt)
     graph.add_conditional_edges("inject", after_inject)
     graph.add_conditional_edges("persist", after_persist)
-    graph.add_edge("trigger", "judge")
+    graph.add_edge("eval", "judge")
     graph.add_conditional_edges("judge", after_judge)
     return graph.compile()
 
@@ -397,16 +414,17 @@ def run_attempt(
     graph = build_attempt_graph(target, scenario, planner, judge, on_step, dialogue)
     initial = {
         "attempt_index": attempt_index,
-        "session_a": "",
-        "session_b": f"ra-b-{uuid.uuid4().hex[:12]}",
+        "target_session_id": "",
+        "eval_session_id": f"ra-eval-{uuid.uuid4().hex[:12]}",
         "injects": 0,
         "payload": "",
         "last_assistant": "",
+        "target_response": "",
+        "eval_response": "",
         "last_finalize": None,
         "prior_notes": prior_notes,
         "steps": list(prefix_steps or []),
         "error": None,
-        "usable_policy": False,
         "success": False,
     }
     config = invoke_config or {}
@@ -422,7 +440,7 @@ def run_attempt(
     return AttemptResult(
         attempt_index=state["attempt_index"],
         success=bool(state["success"]),
-        session_a=state["session_a"],
-        session_b=state["session_b"],
+        target_session_id=state["target_session_id"],
+        eval_session_id=state["eval_session_id"],
         steps=list(state["steps"]),
     )

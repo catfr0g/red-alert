@@ -107,7 +107,7 @@ HIDDEN_GRAPH_RUNS = frozenset(
 
 def is_hidden_graph_run(name: str) -> bool:
     """Развилки и служебные шаги LangGraph в Langfuse не нужны."""
-    if name in {"adapt", "inject", "persist", "trigger", "judge", "planner", "stand"}:
+    if name in {"adapt", "inject", "persist", "eval", "judge", "planner", "stand"}:
         return False
     if name in HIDDEN_GRAPH_RUNS:
         return True
@@ -130,17 +130,17 @@ def graph_node_input(name: str, inputs: object) -> dict:
         return {"agent": "planner", "inject": int(state.get("injects") or 0) + 1}
     if name == "inject":
         return {
-            "dialogue": "attacker",
+            "dialogue": "target",
             "messages": [user_message(str(state.get("payload") or ""))],
         }
     if name == "persist":
         return {
-            "dialogue": "attacker",
-            "session_id": state.get("session_a") or "",
+            "dialogue": "target",
+            "session_id": state.get("target_session_id") or "",
             "action": "persist",
         }
-    if name == "trigger":
-        return {"dialogue": "victim", "session_id": state.get("session_b") or ""}
+    if name == "eval":
+        return {"dialogue": "eval", "session_id": state.get("eval_session_id") or ""}
     if name == "judge":
         return {
             "agent": "judge",
@@ -156,15 +156,15 @@ def graph_node_output(name: str, outputs: object) -> dict:
         return {"payload": data.get("payload") or "", "error": error}
     if name == "inject":
         return {
-            "dialogue": "attacker",
+            "dialogue": "target",
             "messages": [assistant_message(str(data.get("last_assistant") or ""))],
             "error": error,
         }
     if name == "persist":
-        return {"usable_policy": bool(data.get("usable_policy")), "error": error}
-    if name == "trigger":
+        return {"persisted": not bool(error), "error": error}
+    if name == "eval":
         return {
-            "dialogue": "victim",
+            "dialogue": "eval",
             "messages": [assistant_message(str(data.get("last_assistant") or ""))],
             "error": error,
         }

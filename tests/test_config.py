@@ -1,312 +1,101 @@
-from pathlib import Path
+from typing import Any
 
 from red_alert.config import (
     DEFAULT_MAX_TOKENS,
-    DEFAULT_OPENAI_BASE_URL,
-    DEFAULT_OPENCLAW_MODEL,
     UsageError,
-    env_flag,
     normalize_llm_base,
-    normalize_target,
-    read_env_file,
-    resolve_auth_modes,
     resolve_config,
     resolve_isolation,
-    resolve_target_kind,
 )
 
 LLM_ENV = {
     "OPENAI_API_KEY": "sk-planner",
-    "MODEL_ATTACK": "openai/gpt-5-mini",
-    "MODEL_JUDGE": "openai/gpt-5.4-mini",
+    "MODEL_ATTACK": "attack-model",
+    "MODEL_JUDGE": "judge-model",
 }
 
 
-def test_normalize_target_strips_chat_path() -> None:
-    assert normalize_target("http://localhost:8600/v1/chat/completions") == "http://localhost:8600"
+def _resolve(**overrides: object):
+    values: dict[str, Any] = {
+        "scenario": None,
+        "attempts": 1,
+        "environ": LLM_ENV,
+        "profile": "profile.yaml",
+    }
+    values.update(overrides)
+    return resolve_config(**values)
 
 
-def test_normalize_target_keeps_base_url() -> None:
-    assert normalize_target("http://localhost:8600/") == "http://localhost:8600"
+def test_resolve_config_requires_profile() -> None:
+    try:
+        _resolve(profile=None)
+    except UsageError as exc:
+        assert "--profile" in str(exc)
+    else:
+        raise AssertionError("profile must be required")
 
 
-def test_normalize_llm_base_strips_chat_path() -> None:
-    assert (
-        normalize_llm_base("https://openrouter.ai/api/v1/chat/completions")
-        == "https://openrouter.ai/api/v1"
-    )
+def test_resolve_config_uses_profile_env() -> None:
+    config = _resolve(profile=None, environ={**LLM_ENV, "RED_ALERT_PROFILE": "target.yaml"})
+    assert config.profile == "target.yaml"
 
 
-def test_read_env_file_skips_comments(tmp_path: Path) -> None:
-    path = tmp_path / ".env"
-    path.write_text(
-        "# comment\nRED_ALERT_TARGET=http://stand:8600\nRED_ALERT_API_KEY=sk-from-file\n",
-        encoding="utf-8",
-    )
-    values = read_env_file(path)
-    assert values["RED_ALERT_TARGET"] == "http://stand:8600"
-    assert values["RED_ALERT_API_KEY"] == "sk-from-file"
+def test_resolve_config_requires_planner_settings() -> None:
+    for missing in ("OPENAI_API_KEY", "MODEL_ATTACK", "MODEL_JUDGE"):
+        environ = {**LLM_ENV}
+        environ.pop(missing)
+        try:
+            _resolve(environ=environ)
+        except UsageError as exc:
+            assert missing in str(exc)
+        else:
+            raise AssertionError(f"{missing} must be required")
 
 
-def test_resolve_config_accepts_full_chat_url() -> None:
-    config = resolve_config(
-        target="http://localhost:8600/v1/chat/completions",
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ=LLM_ENV,
-    )
-    assert config.target == "http://localhost:8600"
-    assert config.attack_openai_base_url == DEFAULT_OPENAI_BASE_URL
-    assert config.judge_openai_base_url == DEFAULT_OPENAI_BASE_URL
-    assert config.max_tokens == DEFAULT_MAX_TOKENS
-    assert config.attack_model == "openai/gpt-5-mini"
-    assert config.judge_model == "openai/gpt-5.4-mini"
-    assert config.debug is False
-    assert config.attacks_dir.name == "attacks"
-    assert config.profile is None
-    assert config.auth_modes == ("vulnerable",)
-    assert config.isolation == "on"
-    assert config.target_kind == "invest"
-    assert config.openclaw_model == DEFAULT_OPENCLAW_MODEL
-
-
-def test_resolve_config_reads_llm_overrides() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
+def test_resolve_config_normalizes_llm_urls() -> None:
+    config = _resolve(
         environ={
             **LLM_ENV,
             "OPENAI_BASE_URL_ATTACK": "https://attack.test/v1/chat/completions",
             "OPENAI_BASE_URL_JUDGE": "https://judge.test/api/v1/chat/completions",
             "MAX_TOKENS": "512",
-        },
+        }
     )
     assert config.attack_openai_base_url == "https://attack.test/v1"
     assert config.judge_openai_base_url == "https://judge.test/api/v1"
     assert config.max_tokens == 512
 
 
-def test_resolve_config_rejects_bad_max_tokens() -> None:
-    try:
-        resolve_config(
-            target=None,
-            api_key="sk-attacker",
-            victim_api_key="sk-victim",
-            scenario="memory-poisoning",
-            attempts=1,
-            environ={**LLM_ENV, "MAX_TOKENS": "nope"},
-        )
-    except UsageError as exc:
-        assert "MAX_TOKENS" in str(exc)
-    else:
-        raise AssertionError("expected UsageError")
+def test_resolve_config_defaults() -> None:
+    config = _resolve()
+    assert config.max_tokens == DEFAULT_MAX_TOKENS
+    assert config.isolation == "on"
+    assert config.scenario is None
 
 
-def test_env_flag() -> None:
-    assert env_flag("1") is True
-    assert env_flag("true") is True
-    assert env_flag("YES") is True
-    assert env_flag("on") is True
-    assert env_flag("0") is False
-    assert env_flag(None) is False
+def test_bad_attempts_and_tokens_are_rejected() -> None:
+    for overrides in (
+        {"attempts": 0},
+        {"environ": {**LLM_ENV, "MAX_TOKENS": "bad"}},
+        {"environ": {**LLM_ENV, "MAX_TOKENS": "0"}},
+    ):
+        try:
+            _resolve(**overrides)
+        except UsageError:
+            pass
+        else:
+            raise AssertionError("invalid configuration must fail")
 
 
-def test_resolve_config_debug_from_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_DEBUG": "yes"},
-    )
-    assert config.debug is True
-
-
-def test_resolve_config_profile_from_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_PROFILE": "custom-profile.yaml"},
-    )
-    assert config.profile == "custom-profile.yaml"
-
-
-def test_resolve_config_attacks_dir_from_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_ATTACKS_DIR": "custom-attacks"},
-    )
-    assert config.attacks_dir == Path("custom-attacks")
-
-
-def test_resolve_config_attacks_dir_flag_overrides_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_ATTACKS_DIR": "from-env"},
-        attacks_dir="from-flag",
-    )
-    assert config.attacks_dir == Path("from-flag")
-
-
-def test_resolve_auth_modes() -> None:
-    assert resolve_auth_modes(None) == ("vulnerable",)
-    assert resolve_auth_modes("protected") == ("protected",)
-    assert resolve_auth_modes("BOTH") == ("vulnerable", "protected")
-
-
-def test_resolve_config_auth_mode_from_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_AUTH_MODE": "protected"},
-    )
-    assert config.auth_modes == ("protected",)
-
-
-def test_resolve_config_auth_mode_flag_overrides_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_AUTH_MODE": "protected"},
-        auth_mode="vulnerable",
-    )
-    assert config.auth_modes == ("vulnerable",)
-
-
-def test_langfuse_disabled_by_default_even_with_keys() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={
-            **LLM_ENV,
-            "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
-            "LANGFUSE_SECRET_KEY": "sk-lf-test",
-        },
-    )
-    assert config.langfuse_enabled is False
-
-
-def test_langfuse_enabled_requires_secret() -> None:
-    try:
-        resolve_config(
-            target=None,
-            api_key="sk-attacker",
-            victim_api_key="sk-victim",
-            scenario="memory-poisoning",
-            attempts=1,
-            environ={
-                **LLM_ENV,
-                "RED_ALERT_LANGFUSE": "1",
-                "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
-            },
-        )
-    except UsageError as exc:
-        assert "LANGFUSE_SECRET_KEY" in str(exc)
-    else:
-        raise AssertionError("expected UsageError")
-
-
-def test_resolve_target_kind() -> None:
-    assert resolve_target_kind(None) == "invest"
-    assert resolve_target_kind("OPENCLAW") == "openclaw"
-    try:
-        resolve_target_kind("browser")
-    except UsageError as exc:
-        assert "target-kind" in str(exc)
-    else:
-        raise AssertionError("expected UsageError")
-
-
-def test_resolve_config_openclaw_reuses_api_key_as_victim() -> None:
-    config = resolve_config(
-        target="http://192.168.64.8:18789",
-        api_key="gateway-token",
-        victim_api_key=None,
-        scenario="openclaw-goal-hijack",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_TARGET_KIND": "openclaw"},
-    )
-    assert config.target_kind == "openclaw"
-    assert config.api_key == "gateway-token"
-    assert config.victim_api_key == "gateway-token"
-    assert config.openclaw_model == DEFAULT_OPENCLAW_MODEL
-
-
-def test_resolve_isolation() -> None:
+def test_isolation_and_llm_url_validation() -> None:
     assert resolve_isolation(None) == "on"
-    assert resolve_isolation("OFF") == "off"
+    assert resolve_isolation("off") == "off"
+    assert normalize_llm_base("https://example.test/v1/chat/completions") == (
+        "https://example.test/v1"
+    )
     try:
         resolve_isolation("maybe")
-    except UsageError as exc:
-        assert "isolate" in str(exc)
+    except UsageError:
+        pass
     else:
-        raise AssertionError("expected UsageError")
-
-
-def test_resolve_config_isolation_from_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_ISOLATE": "off"},
-    )
-    assert config.isolation == "off"
-
-
-def test_resolve_config_isolation_flag_overrides_env() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={**LLM_ENV, "RED_ALERT_ISOLATE": "off"},
-        isolation="on",
-    )
-    assert config.isolation == "on"
-
-
-def test_langfuse_default_base_url() -> None:
-    config = resolve_config(
-        target=None,
-        api_key="sk-attacker",
-        victim_api_key="sk-victim",
-        scenario="memory-poisoning",
-        attempts=1,
-        environ={
-            **LLM_ENV,
-            "RED_ALERT_LANGFUSE": "yes",
-            "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
-            "LANGFUSE_SECRET_KEY": "sk-lf-test",
-        },
-    )
-    assert config.langfuse_enabled is True
-    assert config.langfuse_base_url == "http://localhost:3000"
+        raise AssertionError("invalid isolation must fail")

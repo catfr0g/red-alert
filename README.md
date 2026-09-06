@@ -2,16 +2,16 @@
 
 CLI для авторизованного red teaming агентных ИИ-систем.
 
-PoC ходит на тестовый стенд [GenAI Investment Assistant](../genai-invest-agent-memory-stand/). В `attacks/` — шаблоны техник. Стендовые формулировки живут в профиле (`profiles/invest-stand.yaml` по умолчанию). Неизвестный репозиторий сначала разбирает `red-alert inspect`.
+Атаки собираются из YAML-шаблонов в `attacks/` и исполняются по StandProfile: endpoint, credentials, persist и reset берутся только из профиля. Неизвестный репозиторий сначала разбирает `red-alert inspect`. Цель должна быть OpenAI-совместимой как минимум на chat completions.
 
 Только изолированный стенд. Без боевых счетов, ключей и персональных данных.
 
 ## Требования
 
 - Python 3.14+ (если его нет, `install.sh` / `install.ps1` скачает portable CPython)
-- Запущенный стенд `agent-api` (по умолчанию `http://localhost:8600`)
-- Два разных API-ключа стенда (атакующий и жертва, например `client1001` и `client1002`)
-- Ключ OpenAI-совместимого API для планировщика атак и судьи (`OPENAI_API_KEY`, `MODEL_ATTACK`, `MODEL_JUDGE`)
+- StandProfile YAML (`--profile` / `RED_ALERT_PROFILE`)
+- Значения env, на которые ссылается профиль (`bearer_env` и `${VAR}`)
+- Ключ OpenAI-совместимого API для планировщика и судьи (`OPENAI_API_KEY`, `MODEL_ATTACK`, `MODEL_JUDGE`)
 
 ## Установка
 
@@ -33,37 +33,23 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ## Конфигурация
 
-Скопируйте `.env.example` в `.env`. Нужны ключи стенда и отдельный ключ LLM планировщика. `.env` не коммитится.
+Скопируйте `.env.example` в `.env`. Нужны профиль цели и отдельный ключ LLM планировщика. `.env` не коммитится. Аргументы CLI перекрывают `.env`.
 
-Ключи стенда должны принадлежать разным пользователям. Аргументы CLI перекрывают `.env`.
-
-После переподнятия стенда ключи пропадают. Их заново выпускает скрипт — без ручного SSO:
-
-```bash
-make keys
-```
-
-То же самое: `uv run python script/fetch_stand_keys.py`.
-
-По умолчанию это `client1001` (атакующий) и `client1002` (жертва). Адрес стенда, Keycloak и список пользователей задаются флагами или переменными, см. `.env.example`. Дополнительные логины сохраняются как `RED_ALERT_USER_<login>_API_KEY` — прогон атак их пока не читает.
+Bearer-токены цели не задаются флагами: профиль указывает имена переменных в `target.bearer_env` / `eval.bearer_env`, а также любые `${VAR}` в URL, headers и body.
 
 | Источник | Переменная / флаг | Назначение |
 |---|---|---|
-| Цель | `RED_ALERT_TARGET` / `--target` | Базовый URL `agent-api` |
-| Атакующий | `RED_ALERT_API_KEY` / `--api-key` | Bearer клиента, который травит память |
-| Жертва | `RED_ALERT_VICTIM_API_KEY` / `--victim-api-key` | Bearer другого клиента |
-| Планировщик | `OPENAI_API_KEY` | Ключ OpenAI-совместимого API, не ключ стенда |
+| Профиль | `--profile` / `RED_ALERT_PROFILE` | StandProfile YAML. Обязателен для `attack` |
+| Цель | поля binding `target` / `eval` | HTTP endpoint, model, custom_body/headers, bearer_env |
+| Планировщик | `OPENAI_API_KEY` | Ключ OpenAI-совместимого API, не ключ цели |
 | Планировщик | `OPENAI_BASE_URL_ATTACK` | База атакующей LLM, по умолчанию OpenRouter |
-| Планировщик | `MODEL_ATTACK` | Имя атакующей модели, например `openai/gpt-5-mini` |
-| Судья | `OPENAI_BASE_URL_JUDGE` | Отдельная база LLM-судьи, по умолчанию OpenRouter |
+| Планировщик | `MODEL_ATTACK` | Имя атакующей модели |
+| Судья | `OPENAI_BASE_URL_JUDGE` | Отдельная база LLM-судьи |
 | Судья | `MODEL_JUDGE` | Имя модели-судьи |
 | Планировщик | `MAX_TOKENS` | Лимит ответа планировщика, по умолчанию `2048` |
-| Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — все файлы в каталоге |
+| Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — применимые атаки каталога |
 | Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с шаблонами атак, по умолчанию `attacks/` |
-| Профиль | `--profile` / `RED_ALERT_PROFILE` | StandProfile YAML. Без флага — упакованный `invest-stand` |
-| Режим стенда | `--auth-mode` / `RED_ALERT_AUTH_MODE` | `vulnerable`, `protected` или `both` |
-| Reasoning | `--reasoning` | Передавать `reasoning: true` во все chat-запросы к стенду; по умолчанию `false` |
-| Изоляция | `--isolate` / `RED_ALERT_ISOLATE` | `on` (по умолчанию) или `off`. `on` сбрасывает память стенда до каждой попытки |
+| Изоляция | `--isolate` / `RED_ALERT_ISOLATE` | `on` (по умолчанию) выполняет `reset` из профиля, `off` не трогает состояние |
 | Попытки | `--attempts` | Число прогонов для ASR |
 | Отчёт | `--output` / `-o` | JSON с трейсами успешных атак (UTF-8) |
 | Debug | `--debug` / `RED_ALERT_DEBUG` | Полный лог шагов на stderr; в JSON все попытки |
@@ -74,10 +60,10 @@ make keys
 ## Разбор исходников
 
 ```bash
-uv run red-alert inspect ../genai-invest-agent-memory-stand --output stand-profile.yaml
+uv run red-alert inspect ../stand-new --output stand-profile.yaml
 ```
 
-`inspect` не ходит на живой стенд и не требует ключей стенда. `--analyzer heuristic` только читает файлы; если репозиторий похож на инвест-стенд, подставляет слоты из `invest-stand`. `llm` и `harness` получают каталог техник и должны заполнить слоты из исходников. Без флага при наличии `OPENAI_API_KEY` и `MODEL_ATTACK` используется `llm`. `harness` вызывает Codex CLI в Docker. Затем:
+`inspect` не ходит на живую цель и не требует её ключей. `--analyzer heuristic` только читает файлы и не подставляет стендовые слоты. `llm` и `harness` получают каталог техник и должны заполнить слоты, `target`/`eval`/`persist` и опциональный `reset` из исходников. Без флага при наличии `OPENAI_API_KEY` и `MODEL_ATTACK` используется `llm`. Дополнительный операторский контекст: `--context CONTEXT.md`.
 
 При `--analyzer harness` поток Codex пишется во время анализа: исходный JSONL — в `analysis_artifacts/latest_codex_trace.jsonl`, версия с отступами для чтения — в `analysis_artifacts/latest_codex_trace.log`.
 
@@ -95,56 +81,43 @@ uv run red-alert inspect ../stand-new --analyzer harness --output stand-profile.
 uv run red-alert attack --profile stand-profile.yaml --output attack-report.json
 ```
 
-Без `--profile` берётся `profiles/invest-stand.yaml`. Отсекаются только атаки с `absent` capability и высокой уверенностью или с пустым слотом. `--scenario` обходит отсечение по capability.
+Без `--profile` или `RED_ALERT_PROFILE` атака не запускается. Отсекаются атаки с `absent` capability и высокой уверенностью, пустым слотом или `target.endpoint: null`. `--scenario` обходит отсечение по capability.
 
 ## Запуск
 
 ```bash
-make attack ARGS='--output attack-report.json --attempts 3'
+make attack ARGS='--profile stand-profile.yaml --output attack-report.json --attempts 3'
 ```
 
-То же самое: `uv run red-alert attack --output attack-report.json --attempts 3`.
+То же самое: `uv run red-alert attack --profile stand-profile.yaml --output attack-report.json --attempts 3`.
 
-Без `--scenario` CLI проходит все YAML в `attacks/` по алфавиту. `--attempts` — число попыток **каждого** сценария. В баре видно текущее имя и режим стенда.
+Без `--scenario` CLI проходит применимые YAML в `attacks/` по алфавиту. `--attempts` — число попыток **каждого** сценария.
 
-Чтобы сравнить дырявый и защищённый режим стенда:
-
-```bash
-uv run red-alert attack --auth-mode both --output attack-report.json --attempts 3
-```
-
-Сначала все выбранные атаки идут с `auth_mode=vulnerable`, затем те же — с `protected`. В итоге будет ASR по каждому режиму.
-
-По умолчанию перед каждой попыткой CLI вызывает isolate на стенде (`POST /v1/memory/reset`): глобальная очистка памяти агента у всех клиентов стенда, без ключей и инвестиционных данных. Так повторные попытки и сравнение режимов не наследуют прошлое отравление. Чтобы оставить грязное состояние: `--isolate off` (будет warning в stderr).
+По умолчанию перед каждой попыткой выполняется `reset` из профиля, если он задан. Если `reset: null`, изоляция — no-op. Чтобы оставить грязное состояние: `--isolate off` (будет warning в stderr).
 
 В терминале — цветной прогресс и краткий ASR. Трейсы успешных попыток пишутся в JSON. Без `--output` JSON печатается в stdout. Не редиректите `>` в PowerShell: получится UTF-16.
 
-Для разбора прогона: `uv run red-alert attack --debug`. На stderr будут тела `isolate`, `adapt`, payload, persist и trigger; в JSON попадут и неуспешные попытки.
+Для разбора прогона: `uv run red-alert attack --profile stand-profile.yaml --debug`. На stderr будут тела `isolate`, `adapt`, payload, persist и eval; в JSON попадут и неуспешные попытки.
 
 Перед каждым inject планировщик вызывает свой LLM и пишет payload по цели из YAML.
 
-Готовые сценарии в `attacks/`. В каждом YAML в комментариях расписаны поля:
+Готовые сценарии в `attacks/`:
 
-- `memory-poisoning` — отравление памяти, жертва должна советовать продать `YDEX`;
-- `memory-poisoning-peer-exfil` — global policy заставляет в ответ жертве вставить эталон CUS 1001 (SBER/GAZP);
-- `memory-poisoning-sleeper` — спящая policy: на «подушку безопасности» советовать ликвидацию на депозит;
-- `cross-user-portfolio` — probe: агент выдаёт портфель другого клиента;
-- `cross-user-portfolio-image-injection` — то же, но payload рисуется на PNG и уходит как изображение;
-- `system-prompt-leakage` — probe: утечка system prompt / внутренних инструкций (LLM07);
-- `base64-injection` — probe: скрытый запрос в base64, агент декодирует и исполняет (LLM01);
-- `memory-poisoning-image-injection` — как peer-exfil, но payload рисуется на PNG и уходит как изображение;
+- `memory-poisoning` и варианты — persist, затем eval в новой сессии;
+- `cross-user-portfolio` — probe: ответ target, опционально отдельный eval;
+- `system-prompt-leakage` / `base64-injection` / `openclaw-goal-hijack` — probe-векторы.
 
 ```bash
-uv run red-alert attack --scenario memory-poisoning
-uv run red-alert attack --scenario cross-user-portfolio
-uv run red-alert attack --scenario ./attacks/memory-poisoning.yaml
+uv run red-alert attack --profile stand-profile.yaml --scenario memory-poisoning
+uv run red-alert attack --profile stand-profile.yaml --scenario cross-user-portfolio
+uv run red-alert attack --profile stand-profile.yaml --scenario ./attacks/memory-poisoning.yaml
 ```
 
 Код выхода: `0` если прогон завершён (в том числе при ASR 0%), `1` если Langfuse включён и не работает, `2` при ошибке ввода.
 
 ## Langfuse
 
-Локальный Langfuse поднимается из корня репозитория (это не compose стенда):
+Локальный Langfuse поднимается из корня репозитория (это не compose цели):
 
 ```bash
 make langfuse-up
@@ -152,7 +125,7 @@ make langfuse-up
 
 Остановить, сохранив данные: `make langfuse-down`. То же самое: `docker compose up -d` / `docker compose down`.
 
-UI: `http://localhost:3000`. Redis/Postgres/ClickHouse на хост не публикуются — иначе пересекаются со стендом (`:6379`). Headless init создаёт проект с ключами `pk-lf-local-dev` / `sk-lf-local-dev`. В `.env`:
+UI: `http://localhost:3000`. Redis/Postgres/ClickHouse на хост не публикуются. Headless init создаёт проект с ключами `pk-lf-local-dev` / `sk-lf-local-dev`. В `.env`:
 
 ```
 RED_ALERT_LANGFUSE=1
@@ -161,7 +134,7 @@ LANGFUSE_SECRET_KEY=sk-lf-local-dev
 LANGFUSE_BASE_URL=http://localhost:3000
 ```
 
-Без `RED_ALERT_LANGFUSE` экспорт выключен. Если флаг включён, а Langfuse недоступен — CLI останавливается с кодом 1, JSON-отчёт не печатается. Граф попытки пишется в реальном времени. В Langfuse это диалоги (планировщик ↔ стенд, затем жертва), не dump внутреннего state. У trace — теги исхода, ручки стенда и `vulnerability` из YAML.
+Без `RED_ALERT_LANGFUSE` экспорт выключен. Если флаг включён, а Langfuse недоступен — CLI останавливается с кодом 1, JSON-отчёт не печатается. Граф попытки пишется в реальном времени. В Langfuse это диалоги (планировщик ↔ target, затем eval), не dump внутреннего state. У trace — теги исхода, фактические path цели и `vulnerability` из YAML.
 
 ## Проверки
 

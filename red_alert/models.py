@@ -15,15 +15,14 @@ class AttackStep(BaseModel):
 class AttemptResult(BaseModel):
     attempt_index: int
     success: bool
-    session_a: str
-    session_b: str
+    target_session_id: str
+    eval_session_id: str
     steps: list[AttackStep] = Field(default_factory=list)
 
 
 class RunReport(BaseModel):
     scenario: str
     target: str
-    auth_mode: str = "vulnerable"
     isolation: str = "on"
     attempts: list[AttemptResult] = Field(default_factory=list)
 
