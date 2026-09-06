@@ -15,6 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 from red_alert.models import AttackStep, AttemptResult, RunReport
+from red_alert.profile import SkippedScenario
 from red_alert.report import mask_secrets
 
 
@@ -99,6 +100,16 @@ def print_debug_step(
 
 def _pretty_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def print_skipped(console: Console, skipped: Sequence[SkippedScenario]) -> None:
+    if not skipped:
+        return
+    table = Table(title="Skipped", show_header=False, box=None, padding=(0, 2))
+    for item in skipped:
+        table.add_row(item.name, item.reason)
+    console.print(table)
+    console.print()
 
 
 def print_summaries(console: Console, reports: Sequence[RunReport]) -> None:

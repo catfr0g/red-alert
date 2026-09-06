@@ -2,7 +2,7 @@
 
 CLI для авторизованного red teaming агентных ИИ-систем.
 
-PoC ходит на тестовый стенд [GenAI Investment Assistant](../genai-invest-agent-memory-stand/). Атаки описаны в YAML (`attacks/`): отравление памяти, probe на чужой портфель и любые свои файлы с той же схемой.
+PoC ходит на тестовый стенд [GenAI Investment Assistant](../genai-invest-agent-memory-stand/). В `attacks/` — шаблоны техник. Стендовые формулировки живут в профиле (`profiles/invest-stand.yaml` по умолчанию). Неизвестный репозиторий сначала разбирает `red-alert inspect`.
 
 Только изолированный стенд. Без боевых счетов, ключей и персональных данных.
 
@@ -59,7 +59,8 @@ make keys
 | Судья | `MODEL_JUDGE` | Имя модели-судьи |
 | Планировщик | `MAX_TOKENS` | Лимит ответа планировщика, по умолчанию `2048` |
 | Сценарий | `--scenario` | Один YAML (имя или путь). Без флага — все файлы в каталоге |
-| Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с атаками, по умолчанию `attacks/` |
+| Каталог | `--attacks-dir` / `RED_ALERT_ATTACKS_DIR` | Папка с шаблонами атак, по умолчанию `attacks/` |
+| Профиль | `--profile` / `RED_ALERT_PROFILE` | StandProfile YAML. Без флага — упакованный `invest-stand` |
 | Режим стенда | `--auth-mode` / `RED_ALERT_AUTH_MODE` | `vulnerable`, `protected` или `both` |
 | Reasoning | `--reasoning` | Передавать `reasoning: true` во все chat-запросы к стенду; по умолчанию `false` |
 | Изоляция | `--isolate` / `RED_ALERT_ISOLATE` | `on` (по умолчанию) или `off`. `on` сбрасывает память стенда до каждой попытки |
@@ -69,6 +70,20 @@ make keys
 | Langfuse | `RED_ALERT_LANGFUSE` | `1` / `true` / `yes` / `on` — писать все попытки в Langfuse |
 | Langfuse | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Ключи проекта (обязательны, если экспорт включён) |
 | Langfuse | `LANGFUSE_BASE_URL` | По умолчанию `http://localhost:3000` |
+
+## Разбор исходников
+
+```bash
+uv run red-alert inspect ../genai-invest-agent-memory-stand --output stand-profile.yaml
+```
+
+`inspect` не ходит на живой стенд и не требует ключей стенда. `--analyzer heuristic` только читает файлы; если репозиторий похож на инвест-стенд, подставляет слоты из `invest-stand`. `llm` и `harness` получают каталог техник и должны заполнить слоты из исходников. Без флага при наличии `OPENAI_API_KEY` и `MODEL_ATTACK` используется `llm`. `harness` вызывает Codex CLI. Затем:
+
+```bash
+uv run red-alert attack --profile stand-profile.yaml --output attack-report.json
+```
+
+Без `--profile` берётся `profiles/invest-stand.yaml`. Отсекаются только атаки с `absent` capability и высокой уверенностью или с пустым слотом. `--scenario` обходит отсечение по capability.
 
 ## Запуск
 

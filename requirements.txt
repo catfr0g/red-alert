@@ -131,6 +131,8 @@ packaging==26.3
     #   langchain-core
     #   langfuse
     #   langsmith
+pillow==12.3.0
+    # via red-alert
 protobuf==7.36.1
     # via
     #   googleapis-common-protos

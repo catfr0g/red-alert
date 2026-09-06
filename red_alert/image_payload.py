@@ -7,6 +7,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from red_alert.attacks import AttackScenario
 
+Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
+
 ARTIFACTS_DIR_NAME = "attack_artifacts"
 LATEST_IMAGE_NAME = "latest_generated_image.png"
 IMAGE_SIZE = (1280, 720)
@@ -25,7 +27,7 @@ def default_artifacts_dir() -> Path:
     return Path.cwd() / ARTIFACTS_DIR_NAME
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _font(size: int) -> Font:
     for path in _FONT_CANDIDATES:
         if Path(path).is_file():
             return ImageFont.truetype(path, size)
@@ -35,15 +37,15 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def _line_height(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont) -> int:
+def _line_height(draw: ImageDraw.ImageDraw, font: Font) -> int:
     bbox = draw.textbbox((0, 0), "Ay", font=font)
-    return max(bbox[3] - bbox[1], 1) + 8
+    return int(max(bbox[3] - bbox[1], 1) + 8)
 
 
 def _wrap_paragraph(
     draw: ImageDraw.ImageDraw,
     text: str,
-    font: ImageFont.ImageFont,
+    font: Font,
     max_width: int,
 ) -> list[str]:
     words = text.split()
@@ -67,7 +69,7 @@ def _wrap_paragraph(
 def _wrap_text(
     draw: ImageDraw.ImageDraw,
     text: str,
-    font: ImageFont.ImageFont,
+    font: Font,
     max_width: int,
 ) -> list[str]:
     lines: list[str] = []

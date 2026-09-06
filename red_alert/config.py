@@ -40,6 +40,7 @@ class AppConfig:
     max_tokens: int
     debug: bool
     attacks_dir: Path
+    profile: str | None
     auth_modes: tuple[str, ...]
     isolation: str = DEFAULT_ISOLATION
     target_kind: str = DEFAULT_TARGET_KIND
@@ -127,6 +128,7 @@ def resolve_config(
     environ: Mapping[str, str],
     debug: bool = False,
     attacks_dir: str | None = None,
+    profile: str | None = None,
     auth_mode: str | None = None,
     reasoning: bool = False,
     isolation: str | None = None,
@@ -213,6 +215,7 @@ def resolve_config(
         max_tokens=max_tokens,
         debug=debug or env_flag(environ.get("RED_ALERT_DEBUG")),
         attacks_dir=resolved_attacks_dir,
+        profile=profile or environ.get("RED_ALERT_PROFILE") or None,
         auth_modes=resolve_auth_modes(auth_mode or environ.get("RED_ALERT_AUTH_MODE")),
         reasoning=reasoning,
         isolation=resolve_isolation(

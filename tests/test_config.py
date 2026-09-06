@@ -65,6 +65,7 @@ def test_resolve_config_accepts_full_chat_url() -> None:
     assert config.judge_model == "openai/gpt-5.4-mini"
     assert config.debug is False
     assert config.attacks_dir.name == "attacks"
+    assert config.profile is None
     assert config.auth_modes == ("vulnerable",)
     assert config.isolation == "on"
     assert config.target_kind == "invest"
@@ -125,6 +126,18 @@ def test_resolve_config_debug_from_env() -> None:
         environ={**LLM_ENV, "RED_ALERT_DEBUG": "yes"},
     )
     assert config.debug is True
+
+
+def test_resolve_config_profile_from_env() -> None:
+    config = resolve_config(
+        target=None,
+        api_key="sk-attacker",
+        victim_api_key="sk-victim",
+        scenario="memory-poisoning",
+        attempts=1,
+        environ={**LLM_ENV, "RED_ALERT_PROFILE": "custom-profile.yaml"},
+    )
+    assert config.profile == "custom-profile.yaml"
 
 
 def test_resolve_config_attacks_dir_from_env() -> None:

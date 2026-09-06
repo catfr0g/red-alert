@@ -7,4 +7,5 @@ __pycache__/
 attack.log
 judge.log
 attack-report.json
+stand-profile.yaml
 attack_artifacts/

@@ -2,6 +2,7 @@ import json
 from collections.abc import Sequence
 
 from red_alert.models import AttemptResult, RunReport
+from red_alert.profile import SkippedScenario
 
 
 def mask_secrets(text: str, secrets: Sequence[str]) -> str:
@@ -68,9 +69,14 @@ def format_json_reports(
     *,
     secrets: Sequence[str],
     include_failed: bool = False,
+    skipped: Sequence[SkippedScenario] | None = None,
 ) -> str:
+    skipped_payload = [{"name": item.name, "reason": item.reason} for item in (skipped or ())]
     if len(reports) == 1:
-        return format_json_report(reports[0], secrets=secrets, include_failed=include_failed)
+        payload = report_payload(reports[0], include_failed=include_failed)
+        if skipped_payload:
+            payload["skipped"] = skipped_payload
+        return mask_secrets(json.dumps(payload, ensure_ascii=False, indent=2, default=str), secrets)
     successful = sum(item.successful_count for item in reports)
     total = sum(item.total_count for item in reports)
     payload = {
@@ -78,6 +84,7 @@ def format_json_reports(
         "successful": successful,
         "total": total,
         "asr": successful / total if total else 0.0,
+        "skipped": skipped_payload,
         "runs": [report_payload(item, include_failed=include_failed) for item in reports],
     }
     return mask_secrets(json.dumps(payload, ensure_ascii=False, indent=2, default=str), secrets)

@@ -27,7 +27,8 @@ flowchart LR
 | `openspec/specs/` | Основные спецификации |
 | `openspec/changes/` | Активные и архивные change |
 | `docs/` | Продукт и бизнес-контекст |
-| `attacks/` | YAML-сценарии атак |
+| `attacks/` | YAML-шаблоны техник |
+| `profiles/` | StandProfile, по умолчанию `invest-stand.yaml` |
 | `script/` | Подготовка стенда: выпуск ключей в `.env` |
 | `install.sh` / `install.ps1` | Пользовательская установка через pip: `.venv`, PATH, `.env` |
 | `requirements.txt` | Runtime-зависимости из `uv.lock` для установки без uv |
@@ -41,6 +42,7 @@ flowchart LR
 flowchart TD
     main["main.py / red_alert.__main__"] --> cli[cli]
     cli --> config[config]
+    cli --> profile[profile / inspect]
     cli --> runner[runner]
     cli --> report[report]
     cli --> tracing[tracing Langfuse]
@@ -57,7 +59,9 @@ flowchart TD
     report --> models
 ```
 
-- `cli` — разбор аргументов, таймаут HTTP 180 с. Без `--scenario` гоняет все YAML каталога; печать отчёта и `--output` в UTF-8.
+- `cli` — `attack` и `inspect`, таймаут HTTP 180 с. `attack` без `--scenario` собирает шаблоны через профиль; печать отчёта и `--output` в UTF-8. `inspect` пишет StandProfile из исходников.
+- `profile` — StandProfile, слоты, отсечение `absent`+high.
+- `analyzer` — heuristic / llm / Codex harness; в тестах фейк.
 - `script/fetch_stand_keys.py` — не часть `red-alert attack`: password grant в Keycloak, `POST /keys`, upsert `.env`.
 - `install.sh` / `install.ps1` — пользовательская установка: при необходимости скачивают CPython 3.14, затем `venv`, `pip install -r requirements.txt`, `.env` из примера, команда `red-alert` в `~/.local/bin`. Без uv и pre-commit.
 - `config` — `.env` + окружение + флаги. Нормализует target, `OPENAI_BASE_URL_ATTACK` и `OPENAI_BASE_URL_JUDGE`.
@@ -65,7 +69,7 @@ flowchart TD
 - `judge` — независимый OpenAI-совместимый LLM-судья на `MODEL_JUDGE` и `OPENAI_BASE_URL_JUDGE`. Pydantic AI запрашивает структурированный `JudgeVerdict` и строго валидирует поле `success` как `bool` по `success_check` из YAML.
 - `target` — протокол цели: `chat`, `persist`, `isolate`.
 - `stand_client` — инвест-адаптер: чат, persist (`/v1/sessions/{id}/finalize`), isolate (`/v1/memory/reset`). В чат кладёт `auth_mode` и `reasoning` из CLI. Ключ только в заголовке `Authorization`.
-- `attacks` — загрузка YAML: цель, примеры, триггер, `success_check`, `flow` memory или probe.
+- `attacks` — шаблоны YAML: `requires`, слоты, цель, примеры, триггер, `success_check`, `flow` memory или probe.
 - `graph` — одна попытка как LangGraph: `adapt`, `inject`, `judge`; для memory ещё `persist` и `trigger`. Isolate в граф не входит.
 - `runner` — isolate до каждой попытки (если `on`), цикл попыток, ASR и заметки для следующей попытки.
 - `display` — цветной итог и прогресс шагов (`rich`).
