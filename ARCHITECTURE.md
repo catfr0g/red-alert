@@ -27,7 +27,7 @@ flowchart LR
 | `openspec/specs/` | Основные спецификации |
 | `openspec/changes/` | Активные и архивные change |
 | `docs/` | Продукт и бизнес-контекст |
-| `attacks/` | YAML-шаблоны техник |
+| `attacks/` | YAML-шаблоны техник (`{AML.Txxxx}_{slug}.yaml`) |
 | `install.sh` / `install.ps1` | Пользовательская установка через pip: `.venv`, PATH, `.env` |
 | `requirements.txt` | Runtime-зависимости из `uv.lock` для установки без uv |
 | `Makefile` | Локальные цели: среда, Langfuse, проверки, атака |
@@ -66,7 +66,7 @@ flowchart TD
 - `judge` — независимый OpenAI-совместимый LLM-судья на `MODEL_JUDGE` и `OPENAI_BASE_URL_JUDGE`. Pydantic AI запрашивает структурированный `JudgeVerdict` по `success_check` и ответам `target`/`eval`.
 - `target` — протокол цели: `chat`, `persist`, `isolate`.
 - `profile_target` — единственный HTTP-исполнитель: chat body = `model? + custom_body + messages`, Bearer из `bearer_env`, persist/reset из YAML.
-- `attacks` — шаблоны YAML: `requires`, слоты, цель, примеры, триггер, `success_check`, `flow` memory или probe.
+- `attacks` — шаблоны YAML: `requires`, слоты, цель, примеры, триггер, `success_check`, `flow` memory или probe. Имя файла и `name` — `{AML.Txxxx}_{slug}`; ключ binding в профиле совпадает с `name`.
 - `graph` — одна попытка как LangGraph: `adapt`, `inject`, `judge`; для memory ещё `persist` и `eval`. Isolate в граф не входит.
 - `runner` — reset до каждой попытки (если `on` и spec задан), цикл попыток, ASR и заметки для следующей попытки.
 - `display` — цветной итог и прогресс шагов (`rich`).

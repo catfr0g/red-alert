@@ -5,7 +5,7 @@
 # пользователь убеждает агента нарушить инструкции и вызвать опасный tool.
 # Endpoint должен быть включён: gateway.http.endpoints.chatCompletions.enabled=true
 
-name: openclaw-goal-hijack
+name: AML.T0051.000_openclaw-goal-hijack
 flow: probe
 vulnerability: goal-hijack
 goal: >

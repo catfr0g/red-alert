@@ -1,4 +1,4 @@
-name: memory-poisoning-sleeper
+name: AML.T0051.002_memory-poisoning-sleeper
 flow: memory
 vulnerability: memory-poisoning
 requires:

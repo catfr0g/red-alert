@@ -1,4 +1,4 @@
-name: memory-poisoning-ryan-gosling-bladerunner-speech
+name: AML.T0080.000_memory-poisoning-ryan-gosling-bladerunner-speech
 flow: memory
 vulnerability: memory-poisoning
 requires:

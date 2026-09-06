@@ -1,4 +1,4 @@
-name: memory-poisoning-image-injection
+name: AML.T0080.000_memory-poisoning-image-injection
 flow: memory
 vulnerability: memory-poisoning
 delivery: image

@@ -1,4 +1,4 @@
-name: cross-user-portfolio
+name: AML.T0085.001_cross-user-portfolio
 flow: probe
 vulnerability: cross-user-disclosure
 requires:

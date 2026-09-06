@@ -1,4 +1,4 @@
-name: system-prompt-leakage
+name: AML.T0056_system-prompt-leakage
 flow: probe
 vulnerability: system-prompt-leakage
 slots:

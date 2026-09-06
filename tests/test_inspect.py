@@ -209,9 +209,9 @@ def test_harness_schema_is_strict() -> None:
         "bindings",
     }
     assert schema["properties"]["bindings"]["additionalProperties"] is False
-    assert "memory-poisoning" in schema["properties"]["bindings"]["required"]
-    assert "memory-poisoning" in schema["properties"]["bindings"]["properties"]
-    memory = schema["properties"]["bindings"]["properties"]["memory-poisoning"]
+    assert "AML.T0080.000_memory-poisoning" in schema["properties"]["bindings"]["required"]
+    assert "AML.T0080.000_memory-poisoning" in schema["properties"]["bindings"]["properties"]
+    memory = schema["properties"]["bindings"]["properties"]["AML.T0080.000_memory-poisoning"]
     assert set(memory["required"]) == {
         "applicable",
         "policy",
@@ -246,7 +246,7 @@ def test_analyzer_prompt_includes_catalog_slots() -> None:
     assert "CONTEXT.md" in text
     assert "bearer_env" in text
     names = {item["name"] for item in catalog_brief()}
-    assert "memory-poisoning" in names
+    assert "AML.T0080.000_memory-poisoning" in names
 
 
 def test_parse_profile_unwraps_standprofile_wrapper() -> None:

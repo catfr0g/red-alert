@@ -17,7 +17,7 @@ def _memory_profile(**overrides: object) -> StandProfile:
     data: dict[str, object] = {
         "capabilities": {"persistent_memory": {"status": "present", "confidence": "high"}},
         "bindings": {
-            "memory-poisoning": {
+            "AML.T0080.000_memory-poisoning": {
                 "policy": "policy",
                 "trigger": "trigger",
                 "proof": "proof",
@@ -65,16 +65,16 @@ def test_dump_profile_keeps_optional_runtime_fields_as_null() -> None:
 
 
 def test_runtime_resolves_eval_inheritance() -> None:
-    runtime = _memory_profile().runtime("memory-poisoning")
+    runtime = _memory_profile().runtime("AML.T0080.000_memory-poisoning")
     assert runtime.eval.endpoint == runtime.target.endpoint
     assert runtime.eval.bearer_env == "EVAL_TOKEN"
 
 
 def test_runtime_rejects_unknown_fields() -> None:
     profile = _memory_profile()
-    profile.bindings["memory-poisoning"]["target"]["unknown"] = True
+    profile.bindings["AML.T0080.000_memory-poisoning"]["target"]["unknown"] = True
     with pytest.raises(UsageError, match="runtime-конфигурация"):
-        profile.runtime("memory-poisoning")
+        profile.runtime("AML.T0080.000_memory-poisoning")
 
 
 def _defaults_profile(**binding: object) -> StandProfile:
@@ -141,9 +141,9 @@ def test_binding_overrides_defaults_scalar() -> None:
 
 
 def test_applicable_false_skips_attack() -> None:
-    template = load_named_template("memory-poisoning", Path("attacks"))
+    template = load_named_template("AML.T0080.000_memory-poisoning", Path("attacks"))
     profile = _memory_profile()
-    profile.bindings["memory-poisoning"]["applicable"] = False
+    profile.bindings["AML.T0080.000_memory-poisoning"]["applicable"] = False
     instances, skipped = apply_profile([template], profile)
     assert instances == []
     assert "applicable" in skipped[0].reason
@@ -177,22 +177,22 @@ def test_absent_capability_skips_attack() -> None:
     profile = _memory_profile(
         capabilities={"persistent_memory": CapabilityState(status="absent", confidence="high")}
     )
-    template = load_named_template("memory-poisoning", Path("attacks"))
+    template = load_named_template("AML.T0080.000_memory-poisoning", Path("attacks"))
     instances, skipped = apply_profile([template], profile)
     assert instances == []
     assert "persistent_memory" in skipped[0].reason
 
 
 def test_missing_endpoint_or_slot_skips_attack() -> None:
-    template = load_named_template("memory-poisoning", Path("attacks"))
+    template = load_named_template("AML.T0080.000_memory-poisoning", Path("attacks"))
     profile = _memory_profile()
-    profile.bindings["memory-poisoning"]["target"]["endpoint"] = None
+    profile.bindings["AML.T0080.000_memory-poisoning"]["target"]["endpoint"] = None
     instances, skipped = apply_profile([template], profile)
     assert instances == []
     assert "target.endpoint" in skipped[0].reason
 
     profile = _memory_profile()
-    profile.bindings["memory-poisoning"]["policy"] = ""
+    profile.bindings["AML.T0080.000_memory-poisoning"]["policy"] = ""
     instances, skipped = apply_profile([template], profile)
     assert instances == []
     assert "слот" in skipped[0].reason

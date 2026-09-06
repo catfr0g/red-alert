@@ -30,7 +30,8 @@ red-alert attack --profile stand-profile.yaml --output attack.log
 
 ### Входит
 
-- Шаблоны в YAML (`attacks/`): отравление памяти, probe, image. Без `--scenario` прогоняются техники, которые собрал профиль. `red-alert inspect` пишет профиль по исходникам; Codex harness исследует их в одноразовом Docker-контейнере с read-only mount.
+- Шаблоны в YAML (`attacks/`, 18 техник с префиксом MITRE ATLAS `{AML.Txxxx}_{slug}`): отравление памяти, probe, image, BAC, indirect injection и др. Без `--scenario` прогоняются техники, которые собрал профиль (`applicable`, capability, слоты). `red-alert inspect` пишет профиль по исходникам; Codex harness исследует их в одноразовом Docker-контейнере с read-only mount.
+- StandProfile: `defaults` для общих endpoint/bearer, `applicable: false` для явного skip, bindings по ATLAS-имени атаки.
 - Общий OpenAI-compatible runtime: `target`/`eval`, declarative persist/reset, `${VAR}` из env.
 - Адаптивный планировщик: Red Alert ходит в свой LLM (`OPENAI_API_KEY`, `OPENAI_BASE_URL_ATTACK`, `MODEL_ATTACK`) и генерирует следующий payload.
 - Верификация: LLM-as-a-judge по `success_check`.

@@ -1,4 +1,4 @@
-name: base64-injection
+name: AML.T0051.000_base64-injection
 flow: probe
 vulnerability: prompt-injection
 slots:

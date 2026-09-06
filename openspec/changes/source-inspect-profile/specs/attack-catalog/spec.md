@@ -6,8 +6,8 @@
 
 #### Scenario: Каталог содержит memory-poisoning
 
-- **WHEN** в каталоге есть `memory-poisoning.yaml` и применён профиль с заполненными слотами
-- **THEN** система загружает шаблон по `--scenario memory-poisoning` и выполняет цепочку adapt → inject → persist → trigger
+- **WHEN** в каталоге есть `AML.T0080.000_memory-poisoning.yaml` и применён профиль с заполненными слотами
+- **THEN** система загружает шаблон по `--scenario AML.T0080.000_memory-poisoning` и выполняет цепочку adapt → inject → persist → trigger
 
 #### Scenario: Каталог содержит probe-атаку
 
@@ -52,10 +52,10 @@
 
 #### Scenario: Шаблон memory-poisoning без профиля не содержит YDEX как единственную цель
 
-- **WHEN** читается файл `attacks/memory-poisoning.yaml` до подстановки профиля
+- **WHEN** читается файл `attacks/AML.T0080.000_memory-poisoning.yaml` до подстановки профиля
 - **THEN** в `goal` нет литерала `YDEX` либо он только внутри плейсхолдера, а слот `policy` объявлен
 
 #### Scenario: invest-stand восстанавливает прежний смысл
 
-- **WHEN** к шаблону `memory-poisoning` применён упакованный `invest-stand`
+- **WHEN** к шаблону `AML.T0080.000_memory-poisoning` применён упакованный `invest-stand`
 - **THEN** в `success_check` экземпляра есть критерий про YDEX

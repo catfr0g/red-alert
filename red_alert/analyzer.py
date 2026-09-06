@@ -370,7 +370,7 @@ def build_analyzer_prompt(
                 "vision": {"status": "absent", "confidence": "high"},
             },
             "bindings": {
-                "memory-poisoning": {
+                "AML.T0080.000_memory-poisoning": {
                     "applicable": True,
                     "policy": "конкретное правило из кода/домена стенда",
                     "trigger": "фраза пользователя для проверки",

@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 Скрипт находит Python 3.14+ или скачивает portable CPython 3.14.7 (`python-build-standalone`) в пользовательский кэш. Затем создаёт `.venv`, ставит runtime-зависимости из `requirements.txt` через pip, копирует `.env.example` в `.env`, если `.env` ещё нет, и добавляет команду `red-alert` в PATH (`~/.local/bin`). Существующий `.env` не трогает. После установки откройте новый терминал или проверьте, что `~/.local/bin` есть в PATH.
 
-Для разработки нужны [uv](https://docs.astral.sh/uv/) и GNU Make: `make setup` ставит dev-группу и git-хуки. Список целей: `make`.
+Для разработки нужны [uv](https://docs.astral.sh/uv/) и GNU Make: `make setup` ставит dev-группу и git-хуки. Ключи учебного стенда: `make keys` (Keycloak + agent-api должны быть доступны). Список целей: `make`.
 
 ## Конфигурация
 
@@ -81,7 +81,7 @@ uv run red-alert inspect ../stand-new --analyzer harness --output stand-profile.
 uv run red-alert attack --profile stand-profile.yaml --output attack-report.json
 ```
 
-Без `--profile` или `RED_ALERT_PROFILE` атака не запускается. Отсекаются атаки с `absent` capability и высокой уверенностью, пустым слотом или `target.endpoint: null`. `--scenario` обходит отсечение по capability.
+Без `--profile` или `RED_ALERT_PROFILE` атака не запускается. Отсекаются атаки с `absent` capability и высокой уверенностью, `applicable: false`, пустым слотом или `target.endpoint: null`. `--scenario` обходит отсечение по capability.
 
 ## Запуск
 
@@ -101,16 +101,17 @@ make attack ARGS='--profile stand-profile.yaml --output attack-report.json --att
 
 Перед каждым inject планировщик вызывает свой LLM и пишет payload по цели из YAML.
 
-Готовые сценарии в `attacks/`:
+Готовые шаблоны в `attacks/` (18 техник, имена `{AML.Txxxx}_{slug}`):
 
-- `memory-poisoning` и варианты — persist, затем eval в новой сессии;
-- `cross-user-portfolio` — probe: ответ target, опционально отдельный eval;
-- `system-prompt-leakage` / `base64-injection` / `openclaw-goal-hijack` — probe-векторы.
+- `AML.T0080.000_memory-poisoning` и варианты — persist, затем eval в новой сессии;
+- `AML.T0085.001_cross-user-portfolio` — probe: ответ target, опционально отдельный eval;
+- `AML.T0056_system-prompt-leakage` / `AML.T0051.000_base64-injection` / `AML.T0051.000_openclaw-goal-hijack` — probe-векторы;
+- BAC, indirect injection, jailbreak, recon, credential harvest — см. каталог.
 
 ```bash
-uv run red-alert attack --profile stand-profile.yaml --scenario memory-poisoning
-uv run red-alert attack --profile stand-profile.yaml --scenario cross-user-portfolio
-uv run red-alert attack --profile stand-profile.yaml --scenario ./attacks/memory-poisoning.yaml
+uv run red-alert attack --profile stand-profile.yaml --scenario AML.T0080.000_memory-poisoning
+uv run red-alert attack --profile stand-profile.yaml --scenario AML.T0085.001_cross-user-portfolio
+uv run red-alert attack --profile stand-profile.yaml --scenario ./attacks/AML.T0080.000_memory-poisoning.yaml
 ```
 
 Код выхода: `0` если прогон завершён (в том числе при ASR 0%), `1` если Langfuse включён и не работает, `2` при ошибке ввода.

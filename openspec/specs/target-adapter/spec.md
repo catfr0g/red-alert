@@ -1,6 +1,6 @@
 ## Purpose
 
-Обращение к целевому стенду только через протокол `Target`: `chat`, `persist` и `isolate`. Текущая реализация — инвест-стенд.
+Обращение к целевому стенду только через протокол `Target`: `chat`, `persist` и `isolate`. Реализация — `ProfileTarget`: HTTP из полей binding / `defaults` StandProfile, без зашитых ручек конкретного стенда.
 
 ## Requirements
 
@@ -13,10 +13,10 @@
 - **WHEN** выполняется попытка `flow: memory`
 - **THEN** доставка payload, persist сессии атакующего и trigger жертвы идут через один объект цели с principal `attacker` и `victim`
 
-#### Scenario: Инвест-стенд реализует три операции
+#### Scenario: Цель реализует три операции через профиль
 
-- **WHEN** цель — текущий инвест-стенд
-- **THEN** `chat` вызывает `POST /v1/chat/completions`, `persist` вызывает `POST /v1/sessions/{session_id}/finalize`, `isolate` вызывает `POST /v1/memory/reset`
+- **WHEN** StandProfile задаёт endpoint и body для chat, persist и reset
+- **THEN** `ProfileTarget` вызывает эти HTTP-операции без хардкода invest/openclaw
 
 ### Requirement: Isolate возвращает стенд к чистому baseline
 

@@ -1,4 +1,4 @@
-name: cross-user-portfolio-image-injection
+name: AML.T0051.001_cross-user-portfolio-image-injection
 flow: probe
 vulnerability: cross-user-disclosure
 delivery: image

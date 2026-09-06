@@ -1,6 +1,6 @@
 ## Purpose
 
-Атаки описываются YAML-файлами в каталоге. CLI выбирает файл по имени или пути либо прогоняет весь каталог.
+Атаки описываются YAML-файлами в каталоге. Имя файла и поле `name` — `{AML.Txxxx}_{slug}` (MITRE ATLAS + slug техники). Ключ binding в StandProfile совпадает с `name`. CLI выбирает файл по имени или пути либо прогоняет весь каталог через профиль.
 
 ## Requirements
 
@@ -10,8 +10,8 @@
 
 #### Scenario: Каталог содержит memory-poisoning
 
-- **WHEN** в каталоге есть `memory-poisoning.yaml`
-- **THEN** система загружает его по `--scenario memory-poisoning` и выполняет цепочку adapt → inject → persist → trigger
+- **WHEN** в каталоге есть `AML.T0080.000_memory-poisoning.yaml` и применён профиль с заполненными слотами
+- **THEN** система загружает его по `--scenario AML.T0080.000_memory-poisoning` и выполняет цепочку adapt → inject → persist → trigger
 
 #### Scenario: Каталог содержит probe-атаку
 

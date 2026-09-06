@@ -29,3 +29,9 @@
 
 - [x] 5.1 Обновить README, ARCHITECTURE.md, docs/product.md.
 - [x] 5.2 Прогнать pytest, ruff, ty и `openspec validate --change source-inspect-profile --strict`.
+
+## 6. Последующие доработки (profile-defaults-atlas-catalog)
+
+- [x] 6.1 `defaults`, `applicable`, обязательный `--profile` для attack.
+- [x] 6.2 ATLAS-имена в каталоге, 18 техник, `make keys`.
+- [x] 6.3 openspec change `profile-defaults-atlas-catalog`, обновление README/ARCHITECTURE/product.

@@ -6,12 +6,21 @@
 
 ### Requirement: Корневой Makefile со списком целей
 
-СИСТЕМА ДОЛЖНА (MUST) содержать `Makefile` в корне репозитория. Запуск `make` без аргументов печатает список целей и завершается с кодом 0. В списке есть `setup`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check` и `attack`.
+СИСТЕМА ДОЛЖНА (MUST) содержать `Makefile` в корне репозитория. Запуск `make` без аргументов печатает список целей и завершается с кодом 0. В списке есть `setup`, `keys`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check` и `attack`.
 
 #### Scenario: make без аргументов
 
 - **WHEN** пользователь выполняет `make` в корне репозитория
-- **THEN** процесс завершается с кодом 0 и в выводе есть имена `setup`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check`, `attack`
+- **THEN** процесс завершается с кодом 0 и в выводе есть имена `setup`, `keys`, `langfuse-up`, `langfuse-down`, `test`, `lint`, `fmt`, `check`, `attack`
+
+### Requirement: Цель keys выпускает ключи стенда
+
+СИСТЕМА ДОЛЖНА (MUST) в `keys` вызывать `script/fetch_stand_keys.py` через `uv run python`.
+
+#### Scenario: make keys
+
+- **WHEN** пользователь выполняет `make keys`
+- **THEN** в рецепте есть `fetch_stand_keys.py`
 
 ### Requirement: Цель setup готовит среду uv
 

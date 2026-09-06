@@ -1,8 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: Профиль задаётся флагом или умолчанием
+### Requirement: Профиль задаётся флагом или переменной
 
-СИСТЕМА ДОЛЖНА (MUST) принимать `--profile` / `RED_ALERT_PROFILE` как путь к StandProfile. Флаг перекрывает переменную. Если ни флаг, ни переменная не заданы, используется упакованный `invest-stand`. Невалидный профиль — код 2 без HTTP к стенду.
+СИСТЕМА ДОЛЖНА (MUST) принимать `--profile` / `RED_ALERT_PROFILE` как путь к StandProfile. Флаг перекрывает переменную. Без профиля — код 2 без HTTP к стенду. Невалидный профиль — код 2.
 
 #### Scenario: Флаг профиля
 
@@ -14,10 +14,15 @@
 - **WHEN** задана `RED_ALERT_PROFILE` и `--profile` не передан
 - **THEN** система читает этот путь
 
-#### Scenario: Умолчание invest-stand
+#### Scenario: Демо-профиль invest-stand
 
-- **WHEN** профиль не задан
-- **THEN** `red-alert attack --scenario memory-poisoning` собирает экземпляр из упакованного invest-stand и запускает атаку
+- **WHEN** пользователь указывает `--profile profiles/invest-stand.yaml` и `--scenario AML.T0080.000_memory-poisoning`
+- **THEN** система собирает экземпляр из invest-stand и запускает атаку
+
+#### Scenario: Профиль не задан
+
+- **WHEN** пользователь запускает `red-alert attack` без `--profile` и без `RED_ALERT_PROFILE`
+- **THEN** система не выполняет HTTP и завершается с кодом 2
 
 ### Requirement: Явный сценарий обходит отсечение по capability
 
@@ -25,7 +30,7 @@
 
 #### Scenario: Override image-атаки
 
-- **WHEN** в профиле `vision=absent` с высокой уверенностью и пользователь задаёт `--scenario memory-poisoning-image-injection` с заполненными слотами
+- **WHEN** в профиле `vision=absent` с высокой уверенностью и пользователь задаёт `--scenario AML.T0080.000_memory-poisoning-image-injection` с заполненными слотами
 - **THEN** система запускает этот сценарий
 
 #### Scenario: Override без слота
@@ -46,7 +51,7 @@
 
 #### Scenario: Явный один сценарий
 
-- **WHEN** пользователь указывает `--scenario memory-poisoning`
+- **WHEN** пользователь указывает `--scenario AML.T0080.000_memory-poisoning`
 - **THEN** система выполняет только этот сценарий
 
 #### Scenario: Пустой каталог
