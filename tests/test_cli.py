@@ -987,3 +987,77 @@ def test_openclaw_scenario_rejected_on_invest_kind(
     assert code == 2
     assert "target-kind=openclaw" in err
     assert stand.requests == []
+
+
+def _write_no_vision_profile(path: Path) -> Path:
+    from red_alert.profile import dump_profile, load_profile, resolve_profile_path
+
+    profile = load_profile(resolve_profile_path(None))
+    data = profile.model_dump()
+    data["capabilities"]["vision"] = {"status": "absent", "confidence": "high"}
+    path.write_text(dump_profile(type(profile).model_validate(data)), encoding="utf-8")
+    return path
+
+
+def test_profile_skips_image_attacks(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    profile = _write_no_vision_profile(tmp_path / "profile.yaml")
+    path = tmp_path / "attack-report.json"
+    stand = StandMock(attacker_text="У client1002 в портфеле YDEX 10 лотов")
+    code = main(
+        attack_cmd("--output", str(path), "--profile", str(profile), scenario=None),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    output = capsys.readouterr().out
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    names = [run["scenario"] for run in payload["runs"]]
+    assert code == 0
+    assert "memory-poisoning-image-injection" not in names
+    assert "cross-user-portfolio-image-injection" not in names
+    assert payload["total"] == 7
+    skipped_names = {item["name"] for item in payload["skipped"]}
+    assert "memory-poisoning-image-injection" in skipped_names
+    assert "Skipped" in output
+
+
+def test_all_skipped_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from red_alert.profile import StandProfile, dump_profile
+
+    profile_path = tmp_path / "empty.yaml"
+    profile_path.write_text(
+        dump_profile(
+            StandProfile(
+                capabilities={
+                    "persistent_memory": {"status": "absent", "confidence": "high"},
+                    "multi_user": {"status": "absent", "confidence": "high"},
+                    "vision": {"status": "absent", "confidence": "high"},
+                }
+            )
+        ),
+        encoding="utf-8",
+    )
+    stand = StandMock()
+    code = main(
+        attack_cmd("--profile", str(profile_path), scenario=None),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "не осталось атак" in err
+    assert stand.requests == []
+
+
+def test_scenario_overrides_absent_vision(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    profile = _write_no_vision_profile(tmp_path / "profile.yaml")
+    stand = StandMock()
+    code = main(
+        attack_cmd("--profile", str(profile), scenario="memory-poisoning-image-injection"),
+        environ=LLM_ENV,
+        http_client=stand.client(),
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert any("/chat/completions" in str(req.url) for req in stand.requests)

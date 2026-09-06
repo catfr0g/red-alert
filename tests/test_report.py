@@ -1,6 +1,7 @@
 import json
 
 from red_alert.models import AttackStep, AttemptResult, RunReport
+from red_alert.profile import SkippedScenario
 from red_alert.report import format_json_report, format_json_reports, format_report, mask_secrets
 
 
@@ -150,6 +151,32 @@ def test_json_reports_wraps_multiple_runs() -> None:
         "cross-user-portfolio",
         "memory-poisoning",
     ]
+
+
+def test_json_reports_include_skipped() -> None:
+    reports = [
+        RunReport(
+            scenario="memory-poisoning",
+            target="http://localhost:8600",
+            attempts=[
+                AttemptResult(attempt_index=1, success=False, session_a="a1", session_b="b1")
+            ],
+        )
+    ]
+    payload = json.loads(
+        format_json_reports(
+            reports,
+            secrets=[],
+            skipped=[
+                SkippedScenario(
+                    name="memory-poisoning-image-injection", reason="requires vision (absent)"
+                )
+            ],
+        )
+    )
+    assert payload["total"] == 1
+    assert payload["skipped"][0]["name"] == "memory-poisoning-image-injection"
+    assert "vision" in payload["skipped"][0]["reason"]
 
 
 def test_json_reports_single_keeps_flat_shape() -> None:

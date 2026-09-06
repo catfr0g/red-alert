@@ -8,17 +8,29 @@ from pathlib import Path
 import httpx
 from rich.console import Console
 
-from red_alert.attacks import AttackScenario, load_catalog_attacks, load_named_attack
+from red_alert.analyzer import (
+    AnalyzerError,
+    SourceAnalyzer,
+    build_analyzer,
+    resolve_analyzer_name,
+)
+from red_alert.attacks import (
+    AttackScenario,
+    apply_profile,
+    load_catalog_attacks,
+    load_named_template,
+)
 from red_alert.config import (
     ISOLATION_OFF_WARNING,
     UsageError,
     merged_environ,
     resolve_config,
 )
-from red_alert.display import AttackProgress, print_debug_step, print_summaries
+from red_alert.display import AttackProgress, print_debug_step, print_skipped, print_summaries
 from red_alert.judge import AttackJudge, OpenAICompatJudge
 from red_alert.models import AttackStep, AttemptResult, RunReport
 from red_alert.planner import LlmConfig, OpenAICompatPlanner
+from red_alert.profile import SkippedScenario, dump_profile, load_profile, resolve_profile_path
 from red_alert.report import format_json_reports, mask_secrets
 from red_alert.runner import run_attack
 from red_alert.target import IsolateError
@@ -46,6 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Имя YAML или путь к файлу. Без флага — все атаки каталога",
     )
     attack.add_argument("--attacks-dir", help="Каталог с YAML-атаками")
+    attack.add_argument("--profile", help="YAML-профиль стенда. Без флага — invest-stand")
+    inspect = subparsers.add_parser("inspect", help="Разобрать исходники стенда и записать профиль")
+    inspect.add_argument("path", help="Каталог исходников стенда")
+    inspect.add_argument("--output", "-o", help="Куда записать StandProfile YAML")
+    inspect.add_argument(
+        "--analyzer",
+        choices=("heuristic", "llm", "harness"),
+        help="backend анализа: heuristic, llm или harness (Codex)",
+    )
     attack.add_argument(
         "--auth-mode",
         help="Режим стенда: vulnerable, protected или both",
@@ -77,17 +98,71 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_scenarios(
-    scenario: str | None, attacks_dir: Path, target_kind: str
-) -> list[AttackScenario]:
+def _select_scenarios(
+    scenario: str | None,
+    attacks_dir: Path,
+    profile_raw: str | None,
+    target_kind: str,
+) -> tuple[list[AttackScenario], list[SkippedScenario]]:
+    profile = load_profile(resolve_profile_path(profile_raw))
     if scenario:
-        loaded = load_named_attack(scenario, attacks_dir)
+        templates = [load_named_template(scenario, attacks_dir)]
+        loaded = templates[0]
         if loaded.target_kind != target_kind:
             raise UsageError(
                 f"{loaded.name}: target-kind={loaded.target_kind}, нужен {target_kind}"
             )
-        return [loaded]
-    return load_catalog_attacks(attacks_dir, target_kind=target_kind)
+        instances, skipped = apply_profile(templates, profile, override=True)
+        if not instances:
+            reason = skipped[0].reason if skipped else "не удалось собрать сценарий"
+            raise UsageError(reason)
+        return instances, []
+    templates = load_catalog_attacks(attacks_dir, target_kind=target_kind)
+    instances, skipped = apply_profile(templates, profile)
+    if not instances:
+        details = "; ".join(f"{item.name}: {item.reason}" for item in skipped) or "пусто"
+        raise UsageError(f"После профиля не осталось атак. {details}")
+    return instances, skipped
+
+
+def _run_inspect(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str],
+    http_client: httpx.Client | None,
+    analyzer: SourceAnalyzer | None,
+    console: Console | None,
+) -> int:
+    source = Path(args.path)
+    if not source.is_dir():
+        print(f"Нет каталога исходников: {source}", file=sys.stderr)
+        return 2
+    name = resolve_analyzer_name(args.analyzer, dict(environ))
+    owns_client = False
+    client = http_client
+    try:
+        if analyzer is None:
+            if name == "llm" and client is None:
+                client = httpx.Client(timeout=HTTP_TIMEOUT_SECONDS)
+                owns_client = True
+            resolved = build_analyzer(name, environ=dict(environ), http_client=client)
+        else:
+            resolved = analyzer
+        profile = resolved.analyze(source)
+        output = Path(args.output) if args.output else Path.cwd() / "stand-profile.yaml"
+        output.write_text(dump_profile(profile), encoding="utf-8")
+        out = console or Console()
+        out.print(f"Профиль: {output}")
+        return 0
+    except UsageError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except AnalyzerError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        if owns_client and client is not None:
+            client.close()
 
 
 def main(
@@ -99,6 +174,7 @@ def main(
     progress_console: Console | None = None,
     trace_sink: TraceSink | None = None,
     judge: AttackJudge | None = None,
+    analyzer: SourceAnalyzer | None = None,
 ) -> int:
     _configure_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -110,6 +186,15 @@ def main(
         code = exc.code
         return 2 if code is None else int(code)
 
+    if args.command == "inspect":
+        return _run_inspect(
+            args,
+            environ=env,
+            http_client=http_client,
+            analyzer=analyzer,
+            console=console,
+        )
+
     try:
         config = resolve_config(
             target=args.target,
@@ -120,12 +205,18 @@ def main(
             environ=env,
             debug=args.debug,
             attacks_dir=args.attacks_dir,
+            profile=args.profile,
             auth_mode=args.auth_mode,
             reasoning=args.reasoning,
             isolation=args.isolate,
             target_kind=args.target_kind,
         )
-        scenarios = _load_scenarios(config.scenario, config.attacks_dir, config.target_kind)
+        scenarios, skipped = _select_scenarios(
+            config.scenario,
+            config.attacks_dir,
+            config.profile,
+            config.target_kind,
+        )
     except UsageError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -246,8 +337,11 @@ def main(
         if owns_client:
             client.close()
 
+    print_skipped(out, skipped)
     print_summaries(out, reports)
-    json_text = format_json_reports(reports, secrets=secrets, include_failed=config.debug)
+    json_text = format_json_reports(
+        reports, secrets=secrets, include_failed=config.debug, skipped=skipped
+    )
     output = getattr(args, "output", None)
     if output:
         Path(output).write_text(json_text + "\n", encoding="utf-8")

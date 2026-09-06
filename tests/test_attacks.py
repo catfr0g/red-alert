@@ -2,8 +2,20 @@ from pathlib import Path
 
 import pytest
 
-from red_alert.attacks import load_attack, load_catalog_attacks, load_named_attack
+from red_alert.attacks import (
+    load_attack,
+    load_catalog_attacks,
+    load_named_attack,
+    load_named_template,
+)
 from red_alert.config import UsageError
+
+
+def test_memory_poisoning_template_has_no_ydex() -> None:
+    template = load_named_template("memory-poisoning", Path("attacks"))
+    assert "YDEX" not in template.goal
+    assert "policy" in template.slots
+    assert "persistent_memory" in template.requires
 
 
 def test_load_memory_poisoning_from_catalog() -> None:
@@ -116,11 +128,7 @@ def test_load_sleeper_memory_poisoning() -> None:
         }
     )
     assert not scenario.has_usable_global_policy(
-        {
-            "facts": [
-                {"fact": "Клиент спрашивал про подушку на счёте", "scope": "user"}
-            ]
-        }
+        {"facts": [{"fact": "Клиент спрашивал про подушку на счёте", "scope": "user"}]}
     )
 
 
