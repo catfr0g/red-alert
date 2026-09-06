@@ -61,11 +61,19 @@ Backend:
 |---|---|---|
 | `heuristic` | всегда есть; default без ключа | нет |
 | `llm` | default при `OPENAI_API_KEY` и `MODEL_ATTACK` | тот же API, что планировщик |
-| `harness` | явный `--analyzer harness` | Codex CLI |
+| `harness` | явный `--analyzer harness` | Codex CLI в Docker |
 
-Живой харнес — **Codex** (`codex exec`): один бинарь, Windows, JSON/YAML в stdout. OpenCode и pi в этом change не подключаем.
+Живой харнес — **Codex** (`codex exec`) внутри одноразового Docker-контейнера. Внешняя команда не меняется: `red-alert inspect <path> --analyzer harness`. Red Alert сам запускает `docker run`, монтирует переданный `<path>` в `/workspace` только для чтения и использует `/workspace` как рабочий каталог Codex. Временный каталог для JSON Schema и `--output-last-message` монтируется отдельно с записью; после запуска он удаляется. Вызов использует `--json`; stdout контейнера построчно пишется с `flush` в `analysis_artifacts/latest_codex_trace.jsonl`, а каждое событие параллельно форматируется с отступами в `analysis_artifacts/latest_codex_trace.log`. Профиль по-прежнему читается из `--output-last-message`. OpenCode и pi в этом change не подключаем.
 
-Альтернатива: только харнес. Не выбрана: без установленного Codex `inspect` нельзя потрогать. Эвристика и LLM дают прогон на машине с уже существующим `.env`.
+Образ содержит Codex CLI, системный `/etc/codex/config.toml`, отдельный config profile `red-alert-harness` и системный `/etc/codex/requirements.toml`. Определение custom permission profile находится и в системном config, чтобы allowlist могла проверить его до загрузки именованного profile. Permission profile сначала запрещает весь filesystem через `:root = "deny"`, затем разрешает только чтение `/workspace` и минимальных runtime-путей; `.env` и сеть команд запрещены. `web_search = "disabled"` отдельно выключает hosted search. `approval_policy = "never"` не даёт запросить выход за границы. Запуск использует `--ignore-user-config`, `--strict-config` и `--ephemeral`; старый `--sandbox` и расширяющий workspace `--add-dir` не передаются.
+
+Контейнер получает сеть, необходимую самому Codex для обращения к OpenAI, но не получает переменные OpenAI/Codex с хоста. Для штатной авторизации Red Alert копирует существующий `$CODEX_HOME/auth.json` (или `~/.codex/auth.json`) во временный каталог Codex и монтирует только эту временную копию. Каталог удаляется после запуска. Исходный auth-файл хоста контейнер не видит и изменить не может.
+
+Образ `red-alert-codex-harness:0.153.4-ra1` строится автоматически при первом harness-запуске, если его нет локально. Dockerfile и оба TOML-файла поставляются внутри Python-пакета. Контейнер запускается с `--rm`, read-only root filesystem, отдельным `tmpfs`, без Linux capabilities и с `no-new-privileges`; файловая граница хоста обеспечивается отсутствием других bind mount.
+
+Альтернатива: локальный Codex CLI с permission profile хоста. Не выбрана: корректность системной allowlist зависит от администраторской установки, а ошибка профиля оставляет процесс рядом с остальными файлами хоста. Docker делает список доступных хостовых путей явным через bind mount.
+
+Альтернатива: только харнес. Не выбрана: без Docker `inspect` нельзя потрогать. Эвристика и LLM остаются доступными без контейнера.
 
 Альтернатива: свой краулер без LLM. Не выбрана как единственный путь: на неизвестном репо bindings будут пустые и почти всё отсечется.
 
@@ -83,7 +91,7 @@ LLM: дерево файлов + короткие выдержки из мани
 
 Харнес и LLM получают краткий каталог шаблонов и должны заполнить слоты по коду, а не только capability. Пустые bindings — только если в исходниках нечего привязать.
 
-Харнес: `codex exec --sandbox read-only --output-schema --output-last-message`; если last-message пуст — вытащить JSON из stdout.
+Харнес: `codex exec --ignore-user-config --profile red-alert-harness --strict-config --ephemeral --output-schema --output-last-message`; если last-message пуст — вытащить JSON из JSONL-трассировки.
 
 ### Отчёт
 

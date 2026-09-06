@@ -21,7 +21,7 @@
 
 ### Requirement: Анализатор за протоколом
 
-СИСТЕМА ДОЛЖНА (MUST) получать профиль через протокол анализатора (`analyze(path) -> StandProfile`). В тестах используется фейк. Живые backend: `heuristic` (только локальные файлы), `llm` (OpenAI-совместимый API, те же `OPENAI_API_KEY` / `MODEL_ATTACK`), `harness` (Codex CLI). `--analyzer` выбирает backend. Без флага: `llm`, если есть ключ и модель атаки, иначе `heuristic`. Сырые исходники в планировщик атаки и судью не передаются.
+СИСТЕМА ДОЛЖНА (MUST) получать профиль через протокол анализатора (`analyze(path) -> StandProfile`). В тестах используется фейк. Живые backend: `heuristic` (только локальные файлы), `llm` (OpenAI-совместимый API, те же `OPENAI_API_KEY` / `MODEL_ATTACK`), `harness` (Codex CLI в Docker). `--analyzer` выбирает backend. Без флага: `llm`, если есть ключ и модель атаки, иначе `heuristic`. Сырые исходники в планировщик атаки и судью не передаются.
 
 #### Scenario: Фейк в тесте
 
@@ -40,8 +40,56 @@
 
 #### Scenario: Сбой харнеса
 
-- **WHEN** `--analyzer harness` и Codex CLI отсутствует или завершается ошибкой
+- **WHEN** `--analyzer harness` и Docker/Codex CLI отсутствует или завершается ошибкой
 - **THEN** система не пишет профиль, пишет ошибку в stderr и завершается с кодом 1
+
+### Requirement: Харнес сохраняет трассировку Codex
+
+СИСТЕМА ДОЛЖНА (MUST) запускать Codex CLI с JSONL-выводом и во время работы построчно сохранять stdout последнего запуска в `analysis_artifacts/latest_codex_trace.jsonl`. Система ДОЛЖНА (MUST) параллельно писать читаемую версию событий с JSON-отступами в `analysis_artifacts/latest_codex_trace.log`. Файл профиля ДОЛЖЕН (MUST) по-прежнему формироваться из `--output-last-message`. Каталог трассировок не должен попадать в Git.
+
+#### Scenario: Успешный харнес пишет JSONL
+
+- **WHEN** `codex exec` успешно возвращает JSONL-события и итоговый профиль
+- **THEN** JSONL-события доступны в `latest_codex_trace.jsonl` до завершения процесса, читаемая версия записана в `latest_codex_trace.log`, а `inspect` пишет StandProfile
+
+#### Scenario: Харнес завершился с ошибкой
+
+- **WHEN** `codex exec` успел вернуть JSONL-события, но завершился с ненулевым кодом
+- **THEN** полученная трассировка сохраняется перед возвратом ошибки
+
+### Requirement: Харнес ограничен каталогом исходников
+
+СИСТЕМА ДОЛЖНА (MUST) запускать Codex в одноразовом Docker-контейнере с read-only root filesystem и config profile `red-alert-harness`, игнорировать общий пользовательский config и не передавать старые `--sandbox` и `--add-dir`. Переданный в `inspect` каталог ДОЛЖЕН (MUST) монтироваться в `/workspace` только для чтения; другие пользовательские каталоги хоста не должны монтироваться. Permission profile ДОЛЖЕН (MUST) запрещать чтение всего filesystem через `:root = "deny"`, затем разрешать только чтение workspace и минимальных runtime-путей; `.env`, сеть команд и hosted web search запрещены. Системный `requirements.toml` внутри образа ДОЛЖЕН (MUST) разрешать `red-alert-harness` через `allowed_permission_profiles`. Codex не должен запрашивать расширение прав или сохранять rollout сессии. Контейнер не должен наследовать переменные OpenAI/Codex с хоста; штатный auth-файл Codex передаётся как временная копия и удаляется после запуска.
+
+#### Scenario: Каталог стенда монтируется только для чтения
+
+- **WHEN** пользователь выполняет `red-alert inspect <path> --analyzer harness`
+- **THEN** argv `docker run` содержит bind mount абсолютного `<path>` в `/workspace` с `readonly`, рабочий каталог равен `/workspace`, других пользовательских каталогов хоста в mount нет
+
+#### Scenario: Харнес получает защищённые флаги
+
+- **WHEN** выбран `--analyzer harness`
+- **THEN** команда Codex внутри контейнера содержит `--ignore-user-config --profile red-alert-harness --strict-config --ephemeral`, но не содержит `--sandbox` и `--add-dir`
+
+#### Scenario: Профиль запрещает секреты и сеть
+
+- **WHEN** загружается `red-alert-harness.config.toml`
+- **THEN** `:root` имеет `deny`, workspace доступен только для чтения, `.env` имеют `deny`, а command network и web search выключены
+
+#### Scenario: Системная политика образа включает custom profile
+
+- **WHEN** собирается поставляемый Docker-образ harness
+- **THEN** `/etc/codex/requirements.toml` разрешает `red-alert-harness` и стандартные профили, а config profile находится в `CODEX_HOME` пользователя контейнера
+
+#### Scenario: Родительское окружение не расширяет права харнеса
+
+- **WHEN** Red Alert запущен с `OPENAI_API_KEY`, `CODEX_SANDBOX`, `CODEX_PERMISSION_PROFILE` и `CODEX_SESSION_ID`
+- **THEN** `docker run` не передаёт эти переменные в контейнер, а для авторизации использует только временную копию штатного `auth.json`
+
+#### Scenario: Docker недоступен
+
+- **WHEN** выбран `--analyzer harness`, но Docker CLI или daemon недоступен
+- **THEN** система не пишет профиль, сообщает понятную ошибку Docker и завершается с кодом 1
 
 ### Requirement: Живой анализатор заполняет слоты техник
 

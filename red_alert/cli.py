@@ -12,6 +12,7 @@ from red_alert.analyzer import (
     AnalyzerError,
     SourceAnalyzer,
     build_analyzer,
+    codex_pretty_trace_path,
     resolve_analyzer_name,
 )
 from red_alert.attacks import (
@@ -153,6 +154,9 @@ def _run_inspect(
         output.write_text(dump_profile(profile), encoding="utf-8")
         out = console or Console()
         out.print(f"Профиль: {output}")
+        trace = codex_pretty_trace_path()
+        if analyzer is None and name == "harness" and trace.is_file():
+            out.print(f"Трассировка Codex: {trace}")
         return 0
     except UsageError as exc:
         print(str(exc), file=sys.stderr)

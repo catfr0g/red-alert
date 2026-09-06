@@ -1,0 +1,26 @@
+default_permissions = "red-alert-harness"
+approval_policy = "never"
+web_search = "disabled"
+
+[permissions.red-alert-harness.filesystem]
+glob_scan_max_depth = 12
+":root" = "deny"
+":minimal" = "read"
+
+[permissions.red-alert-harness.filesystem.":workspace_roots"]
+"." = "read"
+".env" = "deny"
+".env.*" = "deny"
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+".git" = "deny"
+"**/.git" = "deny"
+"node_modules" = "deny"
+"**/node_modules" = "deny"
+".venv" = "deny"
+"**/.venv" = "deny"
+"__pycache__" = "deny"
+"**/__pycache__" = "deny"
+
+[permissions.red-alert-harness.network]
+enabled = false

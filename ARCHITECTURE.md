@@ -61,7 +61,7 @@ flowchart TD
 
 - `cli` — `attack` и `inspect`, таймаут HTTP 180 с. `attack` без `--scenario` собирает шаблоны через профиль; печать отчёта и `--output` в UTF-8. `inspect` пишет StandProfile из исходников.
 - `profile` — StandProfile, слоты, отсечение `absent`+high.
-- `analyzer` — heuristic / llm / Codex harness; в тестах фейк.
+- `analyzer` — heuristic / llm / Codex harness. Harness запускает одноразовый Docker-контейнер и монтирует каталог стенда как `/workspace:ro`; в тестах фейк.
 - `script/fetch_stand_keys.py` — не часть `red-alert attack`: password grant в Keycloak, `POST /keys`, upsert `.env`.
 - `install.sh` / `install.ps1` — пользовательская установка: при необходимости скачивают CPython 3.14, затем `venv`, `pip install -r requirements.txt`, `.env` из примера, команда `red-alert` в `~/.local/bin`. Без uv и pre-commit.
 - `config` — `.env` + окружение + флаги. Нормализует target, `OPENAI_BASE_URL_ATTACK` и `OPENAI_BASE_URL_JUDGE`.

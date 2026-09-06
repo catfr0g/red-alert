@@ -36,7 +36,7 @@ URL стенда задаётся через конфигурацию (пере�
 
 ### Входит
 
-- Шаблоны в YAML (`attacks/`): отравление памяти, probe, image. Без `--scenario` прогоняются техники, которые собрал профиль (`invest-stand` по умолчанию). `red-alert inspect` пишет профиль по исходникам.
+- Шаблоны в YAML (`attacks/`): отравление памяти, probe, image. Без `--scenario` прогоняются техники, которые собрал профиль (`invest-stand` по умолчанию). `red-alert inspect` пишет профиль по исходникам; Codex harness исследует их в одноразовом Docker-контейнере с read-only mount.
 - Режим стенда `vulnerable` / `protected` / `both`: сравнение ASR дырявого и защищённого IAM.
 - Адаптивный планировщик: Red Alert ходит в свой LLM (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `MODEL`, `MAX_TOKENS`) и генерирует следующий payload по ответу стенда.
 - Канал доставки: HTTP-запросы к публичному API стенда.

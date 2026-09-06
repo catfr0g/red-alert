@@ -1,0 +1,7 @@
+default_permissions = ":workspace"
+
+[allowed_permission_profiles]
+":read-only" = true
+":workspace" = true
+":danger-full-access" = true
+red-alert-harness = true

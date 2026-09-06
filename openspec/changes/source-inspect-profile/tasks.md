@@ -21,6 +21,9 @@
 - [x] 4.2 Протокол SourceAnalyzer; фейк для тестов; heuristic без сети; llm на существующем OpenAI-контуре; harness — Codex CLI; секреты и мусорные каталоги не читать.
 - [x] 4.3 Тесты inspect: фейк пишет YAML, нет каталога → 2, .env не попадает в профиль, llm без ключа → 2, нет harness → 1.
 - [x] 4.4 Передать каталог слотов в llm/harness; требовать заполненные bindings; разбор JSON из last-message / шумного stdout.
+- [x] 4.5 Потоково сохранять JSONL-трассировку Codex harness и читаемую версию с отступами в `analysis_artifacts/`; добавить тест и исключение из Git.
+- [x] 4.6 Ограничить Codex harness отдельным permission profile: deny `:root`, read-only workspace, deny `.env`, без command network/web search, approvals и rollout; очистить у дочернего процесса родительские `CODEX_*`; добавить системную allowlist и тесты argv/TOML/env.
+- [x] 4.7 Перенести Codex harness в одноразовый Docker-контейнер: автоматически собирать образ, монтировать указанный каталог как `/workspace:ro`, передавать временную копию штатной авторизации, не монтировать другие пути хоста; обновить тесты и документацию.
 
 ## 5. Документы и проверка
 

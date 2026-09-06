@@ -77,7 +77,19 @@ make keys
 uv run red-alert inspect ../genai-invest-agent-memory-stand --output stand-profile.yaml
 ```
 
-`inspect` не ходит на живой стенд и не требует ключей стенда. `--analyzer heuristic` только читает файлы; если репозиторий похож на инвест-стенд, подставляет слоты из `invest-stand`. `llm` и `harness` получают каталог техник и должны заполнить слоты из исходников. Без флага при наличии `OPENAI_API_KEY` и `MODEL_ATTACK` используется `llm`. `harness` вызывает Codex CLI. Затем:
+`inspect` не ходит на живой стенд и не требует ключей стенда. `--analyzer heuristic` только читает файлы; если репозиторий похож на инвест-стенд, подставляет слоты из `invest-stand`. `llm` и `harness` получают каталог техник и должны заполнить слоты из исходников. Без флага при наличии `OPENAI_API_KEY` и `MODEL_ATTACK` используется `llm`. `harness` вызывает Codex CLI в Docker. Затем:
+
+При `--analyzer harness` поток Codex пишется во время анализа: исходный JSONL — в `analysis_artifacts/latest_codex_trace.jsonl`, версия с отступами для чтения — в `analysis_artifacts/latest_codex_trace.log`.
+
+Для `harness` нужны запущенный Docker и выполненный на хосте `codex login`. Команда остаётся обычной:
+
+```bash
+uv run red-alert inspect ../stand-new --analyzer harness --output stand-profile.yaml
+```
+
+При первом запуске Red Alert автоматически собирает локальный образ `red-alert-codex-harness:0.153.4-ra1`. Указанный каталог монтируется в контейнер как `/workspace` только для чтения. Корневая файловая система контейнера тоже read-only; запись доступна только во временные mount и `tmpfs`. Кроме отдельного временного каталога для результата и временной копии `auth.json`, другие пути хоста контейнеру не передаются. Временные файлы удаляются после анализа.
+
+Внутри образа находятся Codex CLI, `red-alert-harness` и системная allowlist. Профиль запрещает `.env`, `.git`, `node_modules`, `.venv`, `__pycache__`, сеть shell-команд и hosted web search; `approval_policy = "never"` запрещает расширение прав. Сеть самого контейнера остаётся включённой, иначе Codex не сможет обратиться к OpenAI. Переменные `OPENAI_*` и `CODEX_*` с хоста в контейнер не передаются.
 
 ```bash
 uv run red-alert attack --profile stand-profile.yaml --output attack-report.json

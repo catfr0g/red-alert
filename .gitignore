@@ -9,3 +9,4 @@ judge.log
 attack-report.json
 stand-profile.yaml
 attack_artifacts/
+analysis_artifacts/
